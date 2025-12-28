@@ -3,6 +3,7 @@ package dbkit
 import (
 	"database/sql"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +33,14 @@ const (
 	SQLServer DriverType = "sqlserver"
 )
 
+// 预编译的正则表达式，用于 sanitizeArgs 函数
+// 避免每次调用都重新编译，提升性能
+var (
+	postgresPlaceholderRe  = regexp.MustCompile(`\$(\d+)`)
+	sqlserverPlaceholderRe = regexp.MustCompile(`@p(\d+)`)
+	oraclePlaceholderRe    = regexp.MustCompile(`:(\d+)`)
+)
+
 // Config holds the database configuration
 type Config struct {
 	Driver          DriverType    // Database driver type (mysql, postgres, sqlite3)
@@ -58,7 +67,8 @@ func IsValidDriver(driver DriverType) bool {
 
 // DB represents a database connection with chainable methods
 type DB struct {
-	dbMgr *dbManager
+	dbMgr   *dbManager
+	lastErr error
 }
 
 // Tx represents a database transaction with chainable methods
@@ -76,12 +86,13 @@ type sqlExecutor interface {
 
 // dbManager manages database connections
 type dbManager struct {
-	name    string
-	config  *Config
-	db      *sql.DB
-	mu      sync.RWMutex
-	drivers map[string]bool
-	pkCache map[string][]string // Table name -> PK column names
+	name          string
+	config        *Config
+	db            *sql.DB
+	mu            sync.RWMutex
+	drivers       map[string]bool
+	pkCache       map[string][]string // Table name -> PK column names
+	identityCache map[string]string   // Table name -> Identity column name
 }
 
 // MultiDBManager manages multiple database connections
@@ -136,9 +147,10 @@ func OpenDatabaseWithDBName(dbname string, driver DriverType, dsn string, maxOpe
 // Register registers a database connection with a name (multi-database mode)
 func Register(dbname string, config *Config) error {
 	dbMgr := &dbManager{
-		name:    dbname,
-		config:  config,
-		pkCache: make(map[string][]string),
+		name:          dbname,
+		config:        config,
+		pkCache:       make(map[string][]string),
+		identityCache: make(map[string]string),
 	}
 
 	if err := dbMgr.initDB(); err != nil {
@@ -158,12 +170,13 @@ func Register(dbname string, config *Config) error {
 }
 
 // Use switches to a different database by name and returns a DB object for chainable calls
-// This is a convenience method that panics on error for fluent API usage
-// For error handling, use UseWithError instead
+// This is a convenience method that avoids panicking for fluent API usage.
+// If the database is not found or another error occurs, the error is stored in the returned DB object
+// and will be returned by subsequent operations.
 func Use(dbname string) *DB {
 	db, err := UseWithError(dbname)
 	if err != nil {
-		panic(err)
+		return &DB{lastErr: err}
 	}
 	return db
 }
@@ -181,114 +194,252 @@ func UseWithError(dbname string) (*DB, error) {
 	return &DB{dbMgr: dbMgr}, nil
 }
 
+var (
+	// ErrNotInitialized is returned when an operation is performed on an uninitialized database
+	ErrNotInitialized = fmt.Errorf("dbkit: database not initialized. Please call dbkit.OpenDatabase() before using dbkit operations")
+)
+
 // defaultDB returns the default DB object (first registered database or single database mode)
-func defaultDB() *DB {
-	dbMgr := GetCurrentDB()
-	if dbMgr == nil {
-		panic("dbkit: database not initialized. Please call dbkit.OpenDatabase() before using dbkit operations")
+func defaultDB() (*DB, error) {
+	dbMgr, err := safeGetCurrentDB()
+	if err != nil {
+		return nil, err
 	}
-	return &DB{dbMgr: dbMgr}
+	return &DB{dbMgr: dbMgr}, nil
 }
 
 // --- Internal Helper Methods on dbManager to unify DB and Tx logic ---
 
-func (mgr *dbManager) query(executor sqlExecutor, sql string, args ...interface{}) ([]Record, error) {
+func (mgr *dbManager) prepareQuerySQL(querySQL string, args ...interface{}) (string, []interface{}) {
 	driver := mgr.config.Driver
-	sql = mgr.convertPlaceholder(sql, driver)
-	args = mgr.sanitizeArgs(sql, args)
-	LogSQL(mgr.name, sql, args)
+	lowerSQL := strings.ToLower(querySQL)
 
-	rows, err := executor.Query(sql, args...)
-	if err != nil {
-		LogSQLError(mgr.name, sql, args, err)
-		return nil, err
-	}
-	defer rows.Close()
-
-	results, err := scanRecords(rows, driver)
-	if err != nil {
-		LogSQLError(mgr.name, sql, args, err)
-		return nil, err
-	}
-	return results, nil
-}
-
-func (mgr *dbManager) queryFirst(executor sqlExecutor, sql string, args ...interface{}) (*Record, error) {
-	results, err := mgr.query(executor, sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	if len(results) == 0 {
-		return nil, nil
-	}
-	return &results[0], nil
-}
-
-func (mgr *dbManager) queryMap(executor sqlExecutor, sql string, args ...interface{}) ([]map[string]interface{}, error) {
-	driver := mgr.config.Driver
-	lowerSQL := strings.ToLower(sql)
-
-	// 处理Oracle的LIMIT语法
+	// 处理 Oracle 和 SQL Server 的 LIMIT 语法
 	if driver == Oracle {
-		// 检测并替换LIMIT子句
 		if limitIndex := strings.LastIndex(lowerSQL, " limit "); limitIndex != -1 {
-			// 提取LIMIT值
-			limitStr := strings.TrimSpace(sql[limitIndex+6:])
-			// 移除LIMIT部分
-			sql = sql[:limitIndex]
-			// 添加ROWNUM条件
-			if strings.Contains(lowerSQL, " where ") {
-				sql = fmt.Sprintf("SELECT * FROM (%s) WHERE ROWNUM <= %s", sql, limitStr)
-			} else {
-				sql = fmt.Sprintf("SELECT * FROM (%s) WHERE ROWNUM <= %s", sql, limitStr)
-			}
+			limitStr := strings.TrimSpace(querySQL[limitIndex+6:])
+			querySQL = fmt.Sprintf("SELECT * FROM (%s) WHERE ROWNUM <= %s", querySQL[:limitIndex], limitStr)
 		}
 	} else if driver == SQLServer {
-		// 处理SQL Server的LIMIT语法，转换为TOP
 		if limitIndex := strings.LastIndex(lowerSQL, " limit "); limitIndex != -1 {
-			// 提取LIMIT值
-			limitStr := strings.TrimSpace(sql[limitIndex+6:])
-			// 移除LIMIT部分
-			sql = sql[:limitIndex]
-			// 在SELECT关键字后添加TOP N
-			if selectIndex := strings.Index(lowerSQL, "select "); selectIndex != -1 {
-				// 提取SELECT后面的内容
-				selectContent := sql[selectIndex+6:]
-				// 构建新的SQL
-				sql = fmt.Sprintf("SELECT TOP %s %s", limitStr, selectContent)
+			limitStr := strings.TrimSpace(querySQL[limitIndex+6:])
+			sqlPart := querySQL[:limitIndex]
+			if selectIndex := strings.Index(strings.ToLower(sqlPart), "select "); selectIndex != -1 {
+				querySQL = fmt.Sprintf("SELECT TOP %s %s", limitStr, sqlPart[selectIndex+7:])
 			}
 		}
 	}
 
-	sql = mgr.convertPlaceholder(sql, driver)
-	args = mgr.sanitizeArgs(sql, args)
-	LogSQL(mgr.name, sql, args)
+	querySQL = mgr.convertPlaceholder(querySQL, driver)
+	args = mgr.sanitizeArgs(querySQL, args)
+	return querySQL, args
+}
 
-	rows, err := executor.Query(sql, args...)
+func (mgr *dbManager) query(executor sqlExecutor, querySQL string, args ...interface{}) ([]Record, error) {
+	querySQL, args = mgr.prepareQuerySQL(querySQL, args...)
+	LogSQL(mgr.name, querySQL, args)
+
+	rows, err := executor.Query(querySQL, args...)
 	if err != nil {
-		LogSQLError(mgr.name, sql, args, err)
+		LogSQLError(mgr.name, querySQL, args, err)
 		return nil, err
 	}
 	defer rows.Close()
 
-	results, err := scanMaps(rows, driver)
+	results, err := scanRecords(rows, mgr.config.Driver)
 	if err != nil {
-		LogSQLError(mgr.name, sql, args, err)
+		LogSQLError(mgr.name, querySQL, args, err)
 		return nil, err
 	}
 	return results, nil
 }
 
-func (mgr *dbManager) exec(executor sqlExecutor, sql string, args ...interface{}) (sql.Result, error) {
-	sql = mgr.convertPlaceholder(sql, mgr.config.Driver)
-	args = mgr.sanitizeArgs(sql, args)
-	LogSQL(mgr.name, sql, args)
-	result, err := executor.Exec(sql, args...)
+func (mgr *dbManager) queryFirst(executor sqlExecutor, querySQL string, args ...interface{}) (*Record, error) {
+	querySQL = mgr.addLimitOne(querySQL)
+	return mgr.queryFirstInternal(executor, querySQL, args...)
+}
+
+func (mgr *dbManager) queryFirstInternal(executor sqlExecutor, querySQL string, args ...interface{}) (*Record, error) {
+	records, err := mgr.query(executor, querySQL, args...)
 	if err != nil {
-		LogSQLError(mgr.name, sql, args, err)
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+	return &records[0], nil
+}
+
+func (mgr *dbManager) queryMap(executor sqlExecutor, querySQL string, args ...interface{}) ([]map[string]interface{}, error) {
+	querySQL, args = mgr.prepareQuerySQL(querySQL, args...)
+	LogSQL(mgr.name, querySQL, args)
+
+	rows, err := executor.Query(querySQL, args...)
+	if err != nil {
+		LogSQLError(mgr.name, querySQL, args, err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	results, err := scanMaps(rows, mgr.config.Driver)
+	if err != nil {
+		LogSQLError(mgr.name, querySQL, args, err)
+		return nil, err
+	}
+	return results, nil
+}
+
+func (mgr *dbManager) addLimitOne(querySQL string) string {
+	driver := mgr.config.Driver
+	lowerSQL := strings.ToLower(strings.TrimSpace(querySQL))
+
+	// Check if already has limit
+	if strings.Contains(lowerSQL, " limit ") ||
+		strings.Contains(lowerSQL, " top ") ||
+		strings.Contains(lowerSQL, " rownum ") ||
+		strings.Contains(lowerSQL, " fetch first ") ||
+		strings.Contains(lowerSQL, " fetch next ") {
+		return querySQL
+	}
+
+	switch driver {
+	case MySQL, PostgreSQL, SQLite3:
+		return querySQL + " LIMIT 1"
+	case Oracle:
+		return fmt.Sprintf("SELECT * FROM (%s) WHERE ROWNUM <= 1", querySQL)
+	case SQLServer:
+		if strings.HasPrefix(lowerSQL, "select ") {
+			// Basic SELECT TOP 1 implementation
+			// Check for DISTINCT to avoid invalid syntax like "SELECT TOP 1 DISTINCT"
+			if strings.HasPrefix(lowerSQL, "select distinct ") {
+				return "SELECT DISTINCT TOP 1 " + querySQL[16:]
+			}
+			return "SELECT TOP 1 " + querySQL[7:]
+		}
+		return querySQL
+	default:
+		return querySQL
+	}
+}
+
+func (mgr *dbManager) exec(executor sqlExecutor, querySQL string, args ...interface{}) (sql.Result, error) {
+	querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
+	args = mgr.sanitizeArgs(querySQL, args)
+	LogSQL(mgr.name, querySQL, args)
+
+	result, err := executor.Exec(querySQL, args...)
+	if err != nil {
+		LogSQLError(mgr.name, querySQL, args, err)
 		return nil, err
 	}
 	return result, nil
+}
+
+func (mgr *dbManager) getIdentityColumn(executor sqlExecutor, table string) string {
+	mgr.mu.RLock()
+	if col, ok := mgr.identityCache[table]; ok {
+		mgr.mu.RUnlock()
+		return col
+	}
+	mgr.mu.RUnlock()
+
+	var identityCol string
+	driver := mgr.config.Driver
+
+	if driver == SQLServer {
+		// 查询 SQL Server 的标识列
+		query := `
+			SELECT name 
+			FROM sys.columns 
+			WHERE object_id = OBJECT_ID(?) AND is_identity = 1`
+		records, err := mgr.query(executor, query, table)
+		if err == nil && len(records) > 0 {
+			identityCol = records[0].GetString("name")
+		}
+	} else if driver == MySQL {
+		// 查询 MySQL 的自增列
+		query := "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND EXTRA = 'auto_increment'"
+		records, err := mgr.query(executor, query, table)
+		if err == nil && len(records) > 0 {
+			identityCol = records[0].GetString("COLUMN_NAME")
+		}
+	} else if driver == PostgreSQL {
+		// 查询 PostgreSQL 的自增列 (SERIAL 或 IDENTITY)
+		query := `
+			SELECT a.attname
+			FROM pg_attribute a
+			JOIN pg_class c ON a.attrelid = c.oid
+			JOIN pg_namespace n ON c.relnamespace = n.oid
+			WHERE c.relname = ? 
+			  AND n.nspname = current_schema()
+			  AND (a.attidentity != '' OR EXISTS (
+				  SELECT 1 FROM pg_attrdef d WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND d.adsrc LIKE 'nextval%'
+			  ))`
+		// 注意：PostgreSQL 的 adsrc 在新版本中可能不可用，使用 pg_get_expr
+		query = `
+			SELECT a.attname
+			FROM pg_attribute a
+			WHERE a.attrelid = ?::regclass 
+			  AND a.attnum > 0 
+			  AND NOT a.attisdropped
+			  AND (a.attidentity IN ('a', 'd') OR EXISTS (
+				  SELECT 1 FROM pg_attrdef d WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND pg_get_expr(d.adbin, d.adrelid) LIKE 'nextval%'
+			  ))`
+		records, err := mgr.query(executor, query, table)
+		if err == nil && len(records) > 0 {
+			identityCol = records[0].GetString("attname")
+		}
+	} else if driver == Oracle {
+		// 查询 Oracle 的自增列 (IDENTITY)
+		// 尝试从 user_tab_cols 查询，这在 12c+ 中更通用
+		// 注意：如果 Oracle 版本低于 12c，IDENTITY_COLUMN 可能不存在，会导致 ORA-00904
+		query := "SELECT COLUMN_NAME FROM USER_TAB_COLS WHERE TABLE_NAME = ? AND IDENTITY_COLUMN = 'YES'"
+		// 我们使用一个不打印错误的查询方式，或者捕获错误
+		rows, err := mgr.db.Query(query, strings.ToUpper(table))
+		if err == nil {
+			defer rows.Close()
+			if rows.Next() {
+				var colName string
+				if err := rows.Scan(&colName); err == nil {
+					identityCol = colName
+				}
+			}
+		}
+
+		if identityCol == "" {
+			// 如果上述查询失败或未找到，尝试查询 USER_TAB_IDENTITY_COLS
+			query = "SELECT COLUMN_NAME FROM USER_TAB_IDENTITY_COLS WHERE TABLE_NAME = ?"
+			rows, err := mgr.db.Query(query, strings.ToUpper(table))
+			if err == nil {
+				defer rows.Close()
+				if rows.Next() {
+					var colName string
+					if err := rows.Scan(&colName); err == nil {
+						identityCol = colName
+					}
+				}
+			}
+		}
+	} else if driver == SQLite3 {
+		// SQLite3 中，INTEGER PRIMARY KEY 自动就是自增的
+		// 我们检查是否有 INTEGER 类型的 PK
+		query := fmt.Sprintf("PRAGMA table_info(%s)", table)
+		records, err := mgr.query(executor, query)
+		if err == nil {
+			for _, r := range records {
+				if r.GetInt("pk") == 1 && strings.EqualFold(r.GetString("type"), "INTEGER") {
+					identityCol = r.GetString("name")
+					break
+				}
+			}
+		}
+	}
+
+	mgr.mu.Lock()
+	mgr.identityCache[table] = identityCol
+	mgr.mu.Unlock()
+
+	return identityCol
 }
 
 func (mgr *dbManager) getPrimaryKeys(executor sqlExecutor, table string) ([]string, error) {
@@ -407,7 +558,51 @@ func (mgr *dbManager) getPrimaryKeys(executor sqlExecutor, table string) ([]stri
 	return pks, nil
 }
 
+func (mgr *dbManager) getRecordID(record *Record, pks []string) (int64, bool) {
+	if len(pks) == 0 || record == nil {
+		return 0, false
+	}
+
+	firstPK := pks[0]
+	for k, v := range record.columns {
+		if strings.EqualFold(k, firstPK) {
+			// 尝试多种方式转换主键值为 int64
+			switch val := v.(type) {
+			case int:
+				return int64(val), true
+			case int32:
+				return int64(val), true
+			case int64:
+				return val, true
+			case uint:
+				return int64(val), true
+			case uint32:
+				return int64(val), true
+			case uint64:
+				return int64(val), true
+			case float32:
+				return int64(val), true
+			case float64:
+				return int64(val), true
+			case string:
+				if i, err := strconv.ParseInt(val, 10, 64); err == nil {
+					return i, true
+				}
+			default:
+				if i, err := strconv.ParseInt(fmt.Sprintf("%v", v), 10, 64); err == nil {
+					return i, true
+				}
+			}
+			break
+		}
+	}
+	return 0, false
+}
+
 func (mgr *dbManager) save(executor sqlExecutor, table string, record *Record) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
 	if record == nil || len(record.columns) == 0 {
 		return 0, fmt.Errorf("record is empty")
 	}
@@ -462,7 +657,9 @@ func (mgr *dbManager) save(executor sqlExecutor, table string, record *Record) (
 		if err == nil && exists {
 			// 记录存在，执行更新
 			updateRecord := NewRecord()
-			for k, v := range record.columns {
+			columns, _ := mgr.getOrderedColumns(record)
+			for _, k := range columns {
+				v := record.columns[k]
 				isPK := false
 				for _, pk := range pks {
 					if strings.EqualFold(k, pk) {
@@ -486,6 +683,24 @@ func (mgr *dbManager) save(executor sqlExecutor, table string, record *Record) (
 	return mgr.insert(executor, table, record)
 }
 
+// getOrderedColumns returns sorted column names and their corresponding values from a record
+func (mgr *dbManager) getOrderedColumns(record *Record) ([]string, []interface{}) {
+	if record == nil || len(record.columns) == 0 {
+		return nil, nil
+	}
+	columns := make([]string, 0, len(record.columns))
+	for col := range record.columns {
+		columns = append(columns, col)
+	}
+	sort.Strings(columns)
+
+	values := make([]interface{}, len(columns))
+	for i, col := range columns {
+		values[i] = record.columns[col]
+	}
+	return columns, values
+}
+
 func (mgr *dbManager) nativeUpsert(executor sqlExecutor, table string, record *Record, pks []string) (int64, error) {
 	driver := mgr.config.Driver
 
@@ -494,15 +709,14 @@ func (mgr *dbManager) nativeUpsert(executor sqlExecutor, table string, record *R
 		return mgr.mergeUpsert(executor, table, record, pks)
 	}
 
-	var columns []string
-	var values []interface{}
+	columns, values := mgr.getOrderedColumns(record)
 	var placeholders []string
-
-	for col, val := range record.columns {
-		columns = append(columns, col)
-		values = append(values, val)
+	for range columns {
 		placeholders = append(placeholders, "?")
 	}
+
+	identityCol := mgr.getIdentityColumn(executor, table)
+	_ = identityCol // 目前在 nativeUpsert 中仅作为保留，用于后续可能的扩展
 
 	sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, joinStrings(columns), joinStrings(placeholders))
 
@@ -523,6 +737,12 @@ func (mgr *dbManager) nativeUpsert(executor sqlExecutor, table string, record *R
 			}
 		}
 	}
+
+	// 如果有 ON DUPLICATE/CONFLICT 子句，我们需要确保在插入部分正确处理自增列
+	// 对于 MySQL/PG/SQLite 的 nativeUpsert，如果 record 中包含自增列，
+	// 数据库通常会自动处理（如果为 null 或 0 则自增，如果提供了值则使用该值）。
+	// 这与 MERGE 语法强制要求排除 IDENTITY 不同。
+	// 因此这里保持现状，允许 INSERT 部分包含所有 Record 字段。
 
 	if len(updateClauses) > 0 {
 		if driver == MySQL {
@@ -561,6 +781,16 @@ func (mgr *dbManager) nativeUpsert(executor sqlExecutor, table string, record *R
 		return 0, err
 	}
 
+	// 1. 如果 Record 中已经包含了主键（通常是 Update 场景），优先返回它
+	// 这样可以避免某些数据库（如 SQLite）在 Upsert 后 LastInsertId 返回不相关的值
+	if id, ok := mgr.getRecordID(record, pks); ok {
+		rows, _ := res.RowsAffected()
+		if rows > 0 {
+			return id, nil
+		}
+	}
+
+	// 2. 否则对于 MySQL/SQLite 返回最后插入的 ID（通常是 Insert 场景）
 	if driver == MySQL || driver == SQLite3 {
 		id, _ := res.LastInsertId()
 		if id > 0 {
@@ -573,14 +803,7 @@ func (mgr *dbManager) nativeUpsert(executor sqlExecutor, table string, record *R
 
 func (mgr *dbManager) mergeUpsert(executor sqlExecutor, table string, record *Record, pks []string) (int64, error) {
 	driver := mgr.config.Driver
-	columns := make([]string, 0, len(record.columns))
-	values := make([]interface{}, 0, len(record.columns))
-
-	// 保持列的顺序一致
-	for col, val := range record.columns {
-		columns = append(columns, col)
-		values = append(values, val)
-	}
+	columns, values := mgr.getOrderedColumns(record)
 
 	// 构造 USING 子句
 	var selectCols []string
@@ -628,9 +851,20 @@ func (mgr *dbManager) mergeUpsert(executor sqlExecutor, table string, record *Re
 	// 构造 INSERT 子句
 	var insertCols []string
 	var insertVals []string
+	identityCol := mgr.getIdentityColumn(executor, table)
+
 	for _, col := range columns {
-		insertCols = append(insertCols, col)
-		insertVals = append(insertVals, "s."+col)
+		isIdentity := false
+		// 对于支持 IDENTITY/自增的数据库，在 MERGE/Upsert 插入部分排除自增列
+		// 这样数据库会自动生成值，或者避免违反 "GENERATED ALWAYS" 限制
+		if identityCol != "" && strings.EqualFold(col, identityCol) {
+			isIdentity = true
+		}
+
+		if !isIdentity {
+			insertCols = append(insertCols, col)
+			insertVals = append(insertVals, "s."+col)
+		}
 	}
 
 	sqlStr += fmt.Sprintf(" WHEN NOT MATCHED THEN INSERT (%s) VALUES (%s)",
@@ -642,6 +876,9 @@ func (mgr *dbManager) mergeUpsert(executor sqlExecutor, table string, record *Re
 	}
 
 	sqlStr = mgr.convertPlaceholder(sqlStr, driver)
+
+	// 对于 SQL Server，如果我们需要获取生成的 ID，可以使用 OUTPUT 子句
+	// 但这会改变执行方式（从 Exec 变为 QueryRow），为了保持简单，我们先解决报错问题
 	LogSQL(mgr.name, sqlStr, values)
 
 	res, err := executor.Exec(sqlStr, values...)
@@ -650,50 +887,55 @@ func (mgr *dbManager) mergeUpsert(executor sqlExecutor, table string, record *Re
 		return 0, err
 	}
 
+	// 如果是 SQL Server 且执行的是 MERGE (Save)，RowsAffected 可能无法准确反映新生成的 ID
+	// 但至少现在不会报错了。如果用户提供了主键值，我们返回它。
+	if id, ok := mgr.getRecordID(record, pks); ok {
+		return id, nil
+	}
+
 	return res.RowsAffected()
 }
 
 func (mgr *dbManager) insert(executor sqlExecutor, table string, record *Record) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
 	if record == nil || len(record.columns) == 0 {
 		return 0, fmt.Errorf("record is empty")
 	}
 
-	var columns []string
-	var values []interface{}
+	columns, values := mgr.getOrderedColumns(record)
 	var placeholders []string
-
-	driver := mgr.config.Driver
-
-	for col, val := range record.columns {
-		columns = append(columns, col)
-		values = append(values, val)
+	for range columns {
 		placeholders = append(placeholders, "?")
 	}
 
-	sql := fmt.Sprintf("INSERT INTO %s (%s)", table, joinStrings(columns))
+	driver := mgr.config.Driver
+
+	querySQL := fmt.Sprintf("INSERT INTO %s (%s)", table, joinStrings(columns))
 
 	if driver == PostgreSQL {
 		pks, _ := mgr.getPrimaryKeys(executor, table)
 		// 只有当存在单列主键且名为 id 时才使用 RETURNING id
 		if len(pks) == 1 && strings.EqualFold(pks[0], "id") {
-			sql += fmt.Sprintf(" VALUES (%s) RETURNING %s", joinStrings(placeholders), pks[0])
-			sql = mgr.convertPlaceholder(sql, driver)
-			LogSQL(mgr.name, sql, values)
+			querySQL += fmt.Sprintf(" VALUES (%s) RETURNING %s", joinStrings(placeholders), pks[0])
+			querySQL = mgr.convertPlaceholder(querySQL, driver)
+			LogSQL(mgr.name, querySQL, values)
 			var id int64
-			err := executor.QueryRow(sql, values...).Scan(&id)
+			err := executor.QueryRow(querySQL, values...).Scan(&id)
 			if err != nil {
-				LogSQLError(mgr.name, sql, values, err)
+				LogSQLError(mgr.name, querySQL, values, err)
 				return 0, err
 			}
 			return id, nil
 		}
 		// 否则执行普通插入
-		sql += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
-		sql = mgr.convertPlaceholder(sql, driver)
-		LogSQL(mgr.name, sql, values)
-		res, err := executor.Exec(sql, values...)
+		querySQL += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
+		querySQL = mgr.convertPlaceholder(querySQL, driver)
+		LogSQL(mgr.name, querySQL, values)
+		res, err := executor.Exec(querySQL, values...)
 		if err != nil {
-			LogSQLError(mgr.name, sql, values, err)
+			LogSQLError(mgr.name, querySQL, values, err)
 			return 0, err
 		}
 		return res.RowsAffected()
@@ -701,132 +943,196 @@ func (mgr *dbManager) insert(executor sqlExecutor, table string, record *Record)
 
 	if driver == SQLServer {
 		pks, _ := mgr.getPrimaryKeys(executor, table)
-		// 只有当可能存在自增列时才使用 SCOPE_IDENTITY
-		if len(pks) == 1 {
-			sql += fmt.Sprintf(" VALUES (%s); SELECT SCOPE_IDENTITY()", joinStrings(placeholders))
-			sql = mgr.convertPlaceholder(sql, driver)
-			LogSQL(mgr.name, sql, values)
+		identityCol := mgr.getIdentityColumn(executor, table)
+		// 只有当确定存在标识列且它是唯一主键时，才使用 SCOPE_IDENTITY
+		if len(pks) == 1 && identityCol != "" && strings.EqualFold(pks[0], identityCol) {
+			querySQL += fmt.Sprintf(" VALUES (%s); SELECT SCOPE_IDENTITY()", joinStrings(placeholders))
+			querySQL = mgr.convertPlaceholder(querySQL, driver)
+			LogSQL(mgr.name, querySQL, values)
 			var id int64
-			err := executor.QueryRow(sql, values...).Scan(&id)
-			if err != nil {
-				return 0, nil
+			err := executor.QueryRow(querySQL, values...).Scan(&id)
+			if err == nil {
+				return id, nil
 			}
-			return id, nil
+			// 如果获取失败，记录错误并回退到普通插入
+			LogSQLError(mgr.name, querySQL, values, err)
 		}
 
-		sql += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
-		sql = mgr.convertPlaceholder(sql, driver)
-		LogSQL(mgr.name, sql, values)
-		res, err := executor.Exec(sql, values...)
+		querySQL += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
+		querySQL = mgr.convertPlaceholder(querySQL, driver)
+		LogSQL(mgr.name, querySQL, values)
+		res, err := executor.Exec(querySQL, values...)
 		if err != nil {
-			LogSQLError(mgr.name, sql, values, err)
+			LogSQLError(mgr.name, querySQL, values, err)
 			return 0, err
+		}
+
+		// 如果主键存在且非自增，尝试返回主键值
+		if id, ok := mgr.getRecordID(record, pks); ok {
+			return id, nil
 		}
 		return res.RowsAffected()
 	}
 
 	if driver == Oracle {
 		pks, _ := mgr.getPrimaryKeys(executor, table)
-		sql += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
-		sql = mgr.convertPlaceholder(sql, driver)
 
-		idVal := int64(0)
-		if len(pks) > 0 {
-			// 如果有主键，尝试从 record 中获取第一个主键的值作为返回值
-			firstPK := pks[0]
-			for k, v := range record.columns {
-				if strings.EqualFold(k, firstPK) {
-					if i, err := strconv.ParseInt(fmt.Sprintf("%v", v), 10, 64); err == nil {
-						idVal = i
-					}
-					break
-				}
+		// 1. 如果 Record 中已经包含了主键，优先执行并返回该主键
+		if id, ok := mgr.getRecordID(record, pks); ok {
+			querySQL += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
+			querySQL = mgr.convertPlaceholder(querySQL, driver)
+			LogSQL(mgr.name, querySQL, values)
+			_, err := executor.Exec(querySQL, values...)
+			if err != nil {
+				LogSQLError(mgr.name, querySQL, values, err)
+				return 0, err
 			}
+			return id, nil
 		}
 
-		LogSQL(mgr.name, sql, values)
-		_, err := executor.Exec(sql, values...)
+		// 2. 否则尝试使用 RETURNING 获取新生成的 ID
+		if len(pks) == 1 {
+			returningSql := querySQL + fmt.Sprintf(" VALUES (%s) RETURNING %s INTO ?", joinStrings(placeholders), pks[0])
+			returningSql = mgr.convertPlaceholder(returningSql, driver)
+			LogSQL(mgr.name, returningSql, values)
+
+			var lastID int64
+			argsWithOut := append(values, sql.Out{Dest: &lastID})
+			_, err := executor.Exec(returningSql, argsWithOut...)
+			if err == nil {
+				return lastID, nil
+			}
+			LogSQLError(mgr.name, returningSql, values, err)
+		}
+
+		// 3. 最后退回到普通插入
+		querySQL += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
+		querySQL = mgr.convertPlaceholder(querySQL, driver)
+		LogSQL(mgr.name, querySQL, values)
+		res, err := executor.Exec(querySQL, values...)
 		if err != nil {
-			LogSQLError(mgr.name, sql, values, err)
+			LogSQLError(mgr.name, querySQL, values, err)
 			return 0, err
 		}
-		return idVal, nil
+		return res.RowsAffected()
 	}
 
-	sql += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
-	sql = mgr.convertPlaceholder(sql, driver)
-	LogSQL(mgr.name, sql, values)
-	result, err := executor.Exec(sql, values...)
+	querySQL += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
+	querySQL = mgr.convertPlaceholder(querySQL, driver)
+	LogSQL(mgr.name, querySQL, values)
+	result, err := executor.Exec(querySQL, values...)
 	if err != nil {
-		LogSQLError(mgr.name, sql, values, err)
+		LogSQLError(mgr.name, querySQL, values, err)
 		return 0, err
 	}
 	return result.LastInsertId()
 }
 
 func (mgr *dbManager) update(executor sqlExecutor, table string, record *Record, where string, whereArgs ...interface{}) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
 	if record == nil || len(record.columns) == 0 {
 		return 0, fmt.Errorf("record is empty")
 	}
 
+	columns, values := mgr.getOrderedColumns(record)
 	var setClauses []string
-	var values []interface{}
-
-	for col, val := range record.columns {
+	for _, col := range columns {
 		setClauses = append(setClauses, fmt.Sprintf("%s = ?", col))
-		values = append(values, val)
 	}
+
 	values = append(values, whereArgs...)
 
-	var sql string
+	var querySQL string
 	if where != "" {
-		sql = fmt.Sprintf("UPDATE %s SET %s WHERE %s", table, joinStrings(setClauses), where)
+		querySQL = fmt.Sprintf("UPDATE %s SET %s WHERE %s", table, joinStrings(setClauses), where)
 	} else {
-		sql = fmt.Sprintf("UPDATE %s SET %s", table, joinStrings(setClauses))
+		querySQL = fmt.Sprintf("UPDATE %s SET %s", table, joinStrings(setClauses))
 	}
 
-	sql = mgr.convertPlaceholder(sql, mgr.config.Driver)
-	LogSQL(mgr.name, sql, values)
-	result, err := executor.Exec(sql, values...)
+	querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
+	LogSQL(mgr.name, querySQL, values)
+	result, err := executor.Exec(querySQL, values...)
 	if err != nil {
-		LogSQLError(mgr.name, sql, values, err)
+		LogSQLError(mgr.name, querySQL, values, err)
 		return 0, err
 	}
 	return result.RowsAffected()
 }
 
 func (mgr *dbManager) delete(executor sqlExecutor, table string, where string, whereArgs ...interface{}) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
 	if where == "" {
 		return 0, fmt.Errorf("where condition is required for delete")
 	}
 
-	sql := fmt.Sprintf("DELETE FROM %s WHERE %s", table, where)
-	sql = mgr.convertPlaceholder(sql, mgr.config.Driver)
-	LogSQL(mgr.name, sql, whereArgs)
+	querySQL := fmt.Sprintf("DELETE FROM %s WHERE %s", table, where)
+	querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
+	LogSQL(mgr.name, querySQL, whereArgs)
 
-	result, err := executor.Exec(sql, whereArgs...)
+	result, err := executor.Exec(querySQL, whereArgs...)
 	if err != nil {
-		LogSQLError(mgr.name, sql, whereArgs, err)
+		LogSQLError(mgr.name, querySQL, whereArgs, err)
 		return 0, err
 	}
 	return result.RowsAffected()
 }
 
-func (mgr *dbManager) count(executor sqlExecutor, table string, where string, whereArgs ...interface{}) (int64, error) {
-	var sql string
-	if where != "" {
-		sql = fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", table, where)
-	} else {
-		sql = fmt.Sprintf("SELECT COUNT(*) FROM %s", table)
+// deleteRecord 根据 Record 中的主键字段删除记录
+func (mgr *dbManager) deleteRecord(executor sqlExecutor, table string, record *Record) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
 	}
-	sql = mgr.convertPlaceholder(sql, mgr.config.Driver)
-	whereArgs = mgr.sanitizeArgs(sql, whereArgs)
-	LogSQL(mgr.name, sql, whereArgs)
+	if record == nil || len(record.columns) == 0 {
+		return 0, fmt.Errorf("record is empty")
+	}
+
+	// 获取表的主键
+	pks, err := mgr.getPrimaryKeys(executor, table)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get primary keys: %v", err)
+	}
+	if len(pks) == 0 {
+		return 0, fmt.Errorf("table %s has no primary key, cannot use DeleteRecord", table)
+	}
+
+	// 从 Record 中提取主键值构建 WHERE 条件
+	var whereClauses []string
+	var whereArgs []interface{}
+	for _, pk := range pks {
+		if !record.Has(pk) {
+			return 0, fmt.Errorf("primary key '%s' not found in record", pk)
+		}
+		val := record.Get(pk)
+		whereClauses = append(whereClauses, fmt.Sprintf("%s = ?", pk))
+		whereArgs = append(whereArgs, val)
+	}
+
+	where := strings.Join(whereClauses, " AND ")
+	return mgr.delete(executor, table, where, whereArgs...)
+}
+
+func (mgr *dbManager) count(executor sqlExecutor, table string, where string, whereArgs ...interface{}) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
+	var querySQL string
+	if where != "" {
+		querySQL = fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", table, where)
+	} else {
+		querySQL = fmt.Sprintf("SELECT COUNT(*) FROM %s", table)
+	}
+	querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
+	whereArgs = mgr.sanitizeArgs(querySQL, whereArgs)
+	LogSQL(mgr.name, querySQL, whereArgs)
 
 	var count int64
-	err := executor.QueryRow(sql, whereArgs...).Scan(&count)
+	err := executor.QueryRow(querySQL, whereArgs...).Scan(&count)
 	if err != nil {
-		LogSQLError(mgr.name, sql, whereArgs, err)
+		LogSQLError(mgr.name, querySQL, whereArgs, err)
 		return 0, err
 	}
 	return count, nil
@@ -841,6 +1147,9 @@ func (mgr *dbManager) exists(executor sqlExecutor, table string, where string, w
 }
 
 func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []*Record, batchSize int) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
 	if len(records) == 0 {
 		return 0, fmt.Errorf("no records to insert")
 	}
@@ -870,7 +1179,7 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 			allValues = append(allValues, values)
 		}
 
-		var sqlStr string
+		var querySQL string
 		var flatArgs []interface{}
 
 		if driver == PostgreSQL {
@@ -884,22 +1193,58 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 				allPlaceholders = append(allPlaceholders, fmt.Sprintf("(%s)", joinStrings(rowPlaceholders)))
 				flatArgs = append(flatArgs, values...)
 			}
-			sqlStr = fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", table, joinStrings(columns), joinStrings(allPlaceholders))
+			querySQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", table, joinStrings(columns), joinStrings(allPlaceholders))
 		} else if driver == SQLServer || driver == Oracle {
-			for _, values := range allValues {
-				var placeholders []string
-				for range columns {
-					placeholders = append(placeholders, "?")
-				}
-				sqlStr = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, joinStrings(columns), joinStrings(placeholders))
-				sqlStr = mgr.convertPlaceholder(sqlStr, driver)
-				LogSQL(mgr.name, sqlStr, values)
-				result, err := executor.Exec(sqlStr, values...)
+			// 使用预处理语句优化批量插入性能
+			// 预编译一次 SQL，复用执行多条记录
+			var placeholders []string
+			for range columns {
+				placeholders = append(placeholders, "?")
+			}
+			querySQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, joinStrings(columns), joinStrings(placeholders))
+			querySQL = mgr.convertPlaceholder(querySQL, driver)
+
+			// 尝试使用预处理语句
+			if preparer, ok := executor.(interface {
+				Prepare(query string) (*sql.Stmt, error)
+			}); ok {
+				stmt, err := preparer.Prepare(querySQL)
 				if err != nil {
-					return totalAffected, err
+					// 预处理失败，回退到单条执行
+					for _, values := range allValues {
+						LogSQL(mgr.name, querySQL, values)
+						result, err := executor.Exec(querySQL, values...)
+						if err != nil {
+							return totalAffected, err
+						}
+						affected, _ := result.RowsAffected()
+						totalAffected += affected
+					}
+					continue
 				}
-				affected, _ := result.RowsAffected()
-				totalAffected += affected
+				defer stmt.Close()
+
+				// 使用预处理语句批量执行
+				for _, values := range allValues {
+					LogSQL(mgr.name, querySQL, values)
+					result, err := stmt.Exec(values...)
+					if err != nil {
+						return totalAffected, err
+					}
+					affected, _ := result.RowsAffected()
+					totalAffected += affected
+				}
+			} else {
+				// 不支持 Prepare，回退到单条执行
+				for _, values := range allValues {
+					LogSQL(mgr.name, querySQL, values)
+					result, err := executor.Exec(querySQL, values...)
+					if err != nil {
+						return totalAffected, err
+					}
+					affected, _ := result.RowsAffected()
+					totalAffected += affected
+				}
 			}
 			continue
 		} else {
@@ -914,11 +1259,11 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 			for _, values := range allValues {
 				flatArgs = append(flatArgs, values...)
 			}
-			sqlStr = fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", table, joinStrings(columns), joinStrings(valueLists))
+			querySQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", table, joinStrings(columns), joinStrings(valueLists))
 		}
 
-		LogSQL(mgr.name, sqlStr, flatArgs)
-		result, err := executor.Exec(sqlStr, flatArgs...)
+		LogSQL(mgr.name, querySQL, flatArgs)
+		result, err := executor.Exec(querySQL, flatArgs...)
 		if err != nil {
 			return totalAffected, err
 		}
@@ -928,7 +1273,7 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 	return totalAffected, nil
 }
 
-func (mgr *dbManager) paginate(executor sqlExecutor, sql string, page, pageSize int, args ...interface{}) ([]Record, int64, error) {
+func (mgr *dbManager) paginate(executor sqlExecutor, querySQL string, page, pageSize int, args ...interface{}) ([]Record, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -937,11 +1282,11 @@ func (mgr *dbManager) paginate(executor sqlExecutor, sql string, page, pageSize 
 	}
 
 	driver := mgr.config.Driver
-	lowerSQL := strings.ToLower(sql)
-	baseSQL := sql
+	lowerSQL := strings.ToLower(querySQL)
+	baseSQL := querySQL
 	if strings.Contains(lowerSQL, " order by ") {
 		orderIdx := strings.Index(lowerSQL, " order by ")
-		baseSQL = sql[:orderIdx]
+		baseSQL = querySQL[:orderIdx]
 	}
 
 	var countSQL string
@@ -972,18 +1317,18 @@ func (mgr *dbManager) paginate(executor sqlExecutor, sql string, page, pageSize 
 	var paginatedSQL string
 	if driver == SQLServer {
 		if strings.Contains(lowerSQL, " order by ") {
-			paginatedSQL = fmt.Sprintf("%s OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", sql, offset, pageSize)
+			paginatedSQL = fmt.Sprintf("%s OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", querySQL, offset, pageSize)
 		} else {
-			paginatedSQL = fmt.Sprintf("%s ORDER BY (SELECT NULL) OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", sql, offset, pageSize)
+			paginatedSQL = fmt.Sprintf("%s ORDER BY (SELECT NULL) OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", querySQL, offset, pageSize)
 		}
 	} else if driver == Oracle {
 		if strings.Contains(lowerSQL, " order by ") {
-			paginatedSQL = fmt.Sprintf("SELECT a.* FROM (SELECT a.*, ROWNUM rn FROM (%s) a WHERE ROWNUM <= %d) a WHERE rn > %d", sql, offset+pageSize, offset)
+			paginatedSQL = fmt.Sprintf("SELECT a.* FROM (SELECT a.*, ROWNUM rn FROM (%s) a WHERE ROWNUM <= %d) a WHERE rn > %d", querySQL, offset+pageSize, offset)
 		} else {
-			paginatedSQL = fmt.Sprintf("SELECT a.* FROM (SELECT a.*, ROWNUM rn FROM (%s ORDER BY (SELECT NULL)) a WHERE ROWNUM <= %d) a WHERE rn > %d", sql, offset+pageSize, offset)
+			paginatedSQL = fmt.Sprintf("SELECT a.* FROM (SELECT a.*, ROWNUM rn FROM (%s ORDER BY (SELECT NULL)) a WHERE ROWNUM <= %d) a WHERE rn > %d", querySQL, offset+pageSize, offset)
 		}
 	} else {
-		paginatedSQL = fmt.Sprintf("%s LIMIT %d OFFSET %d", sql, pageSize, offset)
+		paginatedSQL = fmt.Sprintf("%s LIMIT %d OFFSET %d", querySQL, pageSize, offset)
 	}
 
 	paginatedSQL = mgr.convertPlaceholder(paginatedSQL, driver)
@@ -1068,6 +1413,11 @@ func scanRows(rows *sql.Rows) ([]map[string]interface{}, error) {
 		}
 		results = append(results, entry)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return results, nil
 }
 
@@ -1092,8 +1442,8 @@ func isBinaryType(dbType string) bool {
 }
 
 // optimizeCountSQL 尝试将简单的 SELECT ... FROM ... 转换为 SELECT COUNT(*) FROM ...
-func optimizeCountSQL(sql string) (string, bool) {
-	lower := strings.ToLower(sql)
+func optimizeCountSQL(querySQL string) (string, bool) {
+	lower := strings.ToLower(querySQL)
 
 	// 如果包含以下关键字，不进行优化，使用子查询最安全
 	if strings.Contains(lower, "distinct") ||
@@ -1113,12 +1463,12 @@ func optimizeCountSQL(sql string) (string, bool) {
 
 	// 检查 FROM 之前是否有子查询（简单判断：是否有左括号）
 	// 如果 SELECT 列表中包含子查询，优化可能会变得复杂，此时回退到安全模式
-	if strings.Contains(sql[:fromIdx], "(") {
+	if strings.Contains(querySQL[:fromIdx], "(") {
 		return "", false
 	}
 
 	// 构建优化的 COUNT 语句
-	optimized := "SELECT COUNT(*) " + sql[fromIdx:]
+	optimized := "SELECT COUNT(*) " + querySQL[fromIdx:]
 	return optimized, true
 }
 
@@ -1171,24 +1521,35 @@ func SetCurrentDB(dbname string) error {
 	return nil
 }
 
-// GetCurrentDB returns the current database manager
-func GetCurrentDB() *dbManager {
+// safeGetCurrentDB returns the current database manager without panicking
+func safeGetCurrentDB() (*dbManager, error) {
 	if multiMgr == nil {
-		panic("dbkit: database not initialized. Please call dbkit.OpenDatabase() or dbkit.Register() before using dbkit operations")
+		return nil, ErrNotInitialized
 	}
 
 	multiMgr.mu.RLock()
-	defer multiMgr.mu.RUnlock()
+	currentDB := multiMgr.currentDB
+	multiMgr.mu.RUnlock()
 
-	if multiMgr.currentDB == "" {
-		panic("dbkit: no current database selected")
+	if currentDB == "" {
+		return nil, ErrNotInitialized
 	}
 
-	if dbMgr, exists := multiMgr.databases[multiMgr.currentDB]; exists {
-		return dbMgr
+	dbMgr := GetDatabase(currentDB)
+	if dbMgr == nil {
+		return nil, ErrNotInitialized
 	}
 
-	panic(fmt.Sprintf("dbkit: current database '%s' not found", multiMgr.currentDB))
+	return dbMgr, nil
+}
+
+// GetCurrentDB returns the current database manager
+func GetCurrentDB() *dbManager {
+	dbMgr, err := safeGetCurrentDB()
+	if err != nil {
+		panic(err.Error())
+	}
+	return dbMgr
 }
 
 // GetDatabase returns the database manager by name
@@ -1355,26 +1716,26 @@ func (mgr *dbManager) Ping() error {
 }
 
 // convertPlaceholder converts ? placeholders to $n for PostgreSQL, @param for SQL Server, or :n for Oracle
-func (mgr *dbManager) convertPlaceholder(sql string, driver DriverType) string {
-	return mgr.convertPlaceholderWithOffset(sql, driver, 0)
+func (mgr *dbManager) convertPlaceholder(querySQL string, driver DriverType) string {
+	return mgr.convertPlaceholderWithOffset(querySQL, driver, 0)
 }
 
 // convertPlaceholderWithOffset converts ? placeholders with an index offset
-func (mgr *dbManager) convertPlaceholderWithOffset(sql string, driver DriverType, offset int) string {
+func (mgr *dbManager) convertPlaceholderWithOffset(querySQL string, driver DriverType, offset int) string {
 	if driver == MySQL || driver == SQLite3 {
-		return sql
+		return querySQL
 	}
 
 	var builder strings.Builder
-	builder.Grow(len(sql) + 10)
+	builder.Grow(len(querySQL) + 10)
 	paramIndex := 1 + offset
 	inString := false
 
-	for i := 0; i < len(sql); i++ {
-		char := sql[i]
+	for i := 0; i < len(querySQL); i++ {
+		char := querySQL[i]
 		// Handle string literals to avoid replacing question marks inside them
 		if char == '\'' {
-			if i+1 < len(sql) && sql[i+1] == '\'' { // Handle escaped single quote ''
+			if i+1 < len(querySQL) && querySQL[i+1] == '\'' { // Handle escaped single quote ''
 				builder.WriteByte('\'')
 				builder.WriteByte('\'')
 				i++
@@ -1405,7 +1766,7 @@ func (mgr *dbManager) convertPlaceholderWithOffset(sql string, driver DriverType
 }
 
 // sanitizeArgs 自动清理不必要的参数。如果用户误传了参数，则根据 SQL 中的占位符数量进行截断或清理。
-func (mgr *dbManager) sanitizeArgs(sql string, args []interface{}) []interface{} {
+func (mgr *dbManager) sanitizeArgs(querySQL string, args []interface{}) []interface{} {
 	if len(args) == 0 {
 		return args
 	}
@@ -1413,35 +1774,57 @@ func (mgr *dbManager) sanitizeArgs(sql string, args []interface{}) []interface{}
 	placeholderCount := 0
 	switch mgr.config.Driver {
 	case PostgreSQL:
-		// 统计 $1, $2... 的数量
-		for i := 1; ; i++ {
-			if strings.Contains(sql, fmt.Sprintf("$%d", i)) {
-				placeholderCount = i
-			} else {
-				break
+		// 使用预编译正则精确匹配 $1, $2...，避免 $1 匹配到 $10
+		matches := postgresPlaceholderRe.FindAllStringSubmatch(querySQL, -1)
+		for _, match := range matches {
+			if len(match) > 1 {
+				idx, _ := strconv.Atoi(match[1])
+				if idx > placeholderCount {
+					placeholderCount = idx
+				}
 			}
 		}
 	case SQLServer:
-		// 统计 @p1, @p2... 的数量
-		for i := 1; ; i++ {
-			if strings.Contains(sql, fmt.Sprintf("@p%d", i)) {
-				placeholderCount = i
-			} else {
-				break
+		// 使用预编译正则精确匹配 @p1, @p2...
+		matches := sqlserverPlaceholderRe.FindAllStringSubmatch(querySQL, -1)
+		for _, match := range matches {
+			if len(match) > 1 {
+				idx, _ := strconv.Atoi(match[1])
+				if idx > placeholderCount {
+					placeholderCount = idx
+				}
 			}
 		}
 	case Oracle:
-		// 统计 :1, :2... 的数量
-		for i := 1; ; i++ {
-			if strings.Contains(sql, fmt.Sprintf(":%d", i)) {
-				placeholderCount = i
-			} else {
-				break
+		// 使用预编译正则精确匹配 :1, :2...
+		matches := oraclePlaceholderRe.FindAllStringSubmatch(querySQL, -1)
+		for _, match := range matches {
+			if len(match) > 1 {
+				idx, _ := strconv.Atoi(match[1])
+				if idx > placeholderCount {
+					placeholderCount = idx
+				}
 			}
 		}
 	case MySQL, SQLite3:
-		// 统计 ? 的数量
-		placeholderCount = strings.Count(sql, "?")
+		// 统计 ? 的数量，需要跳过字符串常量中的问号
+		count := 0
+		inString := false
+		var quoteChar rune
+		for i, char := range querySQL {
+			if (char == '\'' || char == '"' || char == '`') && (i == 0 || querySQL[i-1] != '\\') {
+				if !inString {
+					inString = true
+					quoteChar = char
+				} else if char == quoteChar {
+					inString = false
+				}
+			}
+			if char == '?' && !inString {
+				count++
+			}
+		}
+		placeholderCount = count
 	}
 
 	if placeholderCount == 0 {
