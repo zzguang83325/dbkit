@@ -5,7 +5,8 @@ import (
 	"log"
 	"path/filepath"
 
-	"dbkit"
+	_ "github.com/sijms/go-ora/v2"
+	"github.com/zzguang83325/dbkit"
 )
 
 func main() {

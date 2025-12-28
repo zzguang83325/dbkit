@@ -5,7 +5,12 @@ import (
 	"log"
 	"path/filepath"
 
-	"dbkit"
+	_ "github.com/go-sql-driver/mysql"
+	// _ "github.com/lib/pq"           // postgresql 驱动
+	// _ "github.com/mattn/go-sqlite3" // sqlite驱动
+	// _ "github.com/sijms/go-ora/v2"  // oracle驱动
+	// _ "github.com/denisenkom/go-mssqldb" // sqlserver驱动
+	"github.com/zzguang83325/dbkit"
 )
 
 func main() {

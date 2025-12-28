@@ -6,7 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"dbkit"
+	_ "github.com/lib/pq"
+	"github.com/zzguang83325/dbkit"
 )
 
 func main() {
@@ -19,7 +20,12 @@ func main() {
 	// 初始化数据库连接
 	fmt.Println("1. 初始化PostgreSQL数据库...")
 	// PostgreSQL 连接字符串格式: user=postgres password=xxx host=localhost port=5432 dbname=test sslmode=disable
-	dbkit.OpenDatabase(dbkit.PostgreSQL, "user=test password=123456 host=192.168.10.220 port=5432 dbname=postgres sslmode=disable", 25)
+	err := dbkit.OpenDatabase(dbkit.PostgreSQL, "user=test password=123456 host=192.168.10.220 port=5432 dbname=postgres sslmode=disable", 25)
+
+	if err != nil {
+		log.Fatalf("数据库连接失败: %v", err)
+		return
+	}
 	defer dbkit.Close()
 
 	// 检查连接
@@ -31,7 +37,7 @@ func main() {
 	// 创建表
 	fmt.Println("\n2. 创建示例表...")
 	dbkit.Exec("DROP TABLE IF EXISTS orders")
-	_, err := dbkit.Exec(`
+	_, err = dbkit.Exec(`
 		CREATE TABLE orders (
 			id SERIAL PRIMARY KEY,
 			customer_name VARCHAR(100) NOT NULL,

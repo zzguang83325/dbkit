@@ -5,7 +5,8 @@ import (
 	"log"
 	"os"
 
-	"dbkit"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/zzguang83325/dbkit"
 )
 
 func main() {

@@ -5,7 +5,8 @@ import (
 	"log"
 	"path/filepath"
 
-	"dbkit"
+	_ "github.com/denisenkom/go-mssqldb"
+	"github.com/zzguang83325/dbkit"
 )
 
 func main() {

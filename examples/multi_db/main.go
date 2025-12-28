@@ -1,13 +1,20 @@
 package main
 
 import (
-	"dbkit"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	_ "github.com/denisenkom/go-mssqldb"
+	_ "github.com/go-sql-driver/mysql"
+
+	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/sijms/go-ora/v2"
+	"github.com/zzguang83325/dbkit"
 )
 
 // printLog 统一输出函数，同时在控制台打印并记录到日志系统
@@ -37,19 +44,34 @@ func main() {
 	printLog("\n1. 正在连接数据库...")
 
 	// MySQL
-	dbkit.OpenDatabaseWithDBName("mysql", dbkit.MySQL, "root:123456@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local", 25)
+	dberr := dbkit.OpenDatabaseWithDBName("mysql", dbkit.MySQL, "root:123456@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local", 25)
+	if dberr != nil {
+		log.Fatalf("MySQL数据库连接失败: %v", dberr)
+	}
 
 	// PostgreSQL
-	dbkit.OpenDatabaseWithDBName("postgresql", dbkit.PostgreSQL, "user=test password=123456 host=192.168.10.220 port=5432 dbname=postgres sslmode=disable", 25)
+	dberr = dbkit.OpenDatabaseWithDBName("postgresql", dbkit.PostgreSQL, "user=test password=123456 host=192.168.10.220 port=5432 dbname=postgres sslmode=disable", 25)
+	if dberr != nil {
+		log.Fatalf("PostgreSQL数据库连接失败: %v", dberr)
+	}
 
 	// Oracle
-	dbkit.OpenDatabaseWithDBName("oracle", dbkit.Oracle, "oracle://test:123456@192.168.10.44:1521/orcl", 25)
+	dberr = dbkit.OpenDatabaseWithDBName("oracle", dbkit.Oracle, "oracle://test:123456@192.168.10.44:1521/orcl", 25)
+	if dberr != nil {
+		log.Fatalf("Oracle数据库连接失败: %v", dberr)
+	}
 
 	// SQL Server
-	dbkit.OpenDatabaseWithDBName("sqlserver", dbkit.SQLServer, "sqlserver://sa:123456@192.168.10.44:1433?database=test", 25)
+	dberr = dbkit.OpenDatabaseWithDBName("sqlserver", dbkit.SQLServer, "sqlserver://sa:123456@192.168.10.44:1433?database=test", 25)
+	if dberr != nil {
+		log.Fatalf("SQL Server数据库连接失败: %v", dberr)
+	}
 
 	// SQLite
-	dbkit.OpenDatabaseWithDBName("sqlite", dbkit.SQLite3, "file:test_multi.db?cache=shared&mode=rwc", 10)
+	dberr = dbkit.OpenDatabaseWithDBName("sqlite", dbkit.SQLite3, "file:test_multi.db?cache=shared&mode=rwc", 10)
+	if dberr != nil {
+		log.Fatalf("SQLite数据库连接失败: %v", dberr)
+	}
 
 	// 显示已注册的数据库
 	printLog("已注册的数据库列表: %v", dbkit.ListDatabases())
@@ -73,11 +95,8 @@ func runFullTest(dbName string) {
 	printLog("开始测试数据库: %s", strings.ToUpper(dbName))
 	printLog(strings.Repeat("=", 50))
 
-	// 切换当前数据库上下文
-	_ = dbkit.Use(dbName)
-
 	// --- 准备工作：清理并创建测试表 ---
-	//prepareTables(dbName)
+	prepareTables(dbName)
 
 	// --- 1. dbkit 自带的增删改查 (ActiveRecord 风格) ---
 	testActiveRecordCRUD(dbName)

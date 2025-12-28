@@ -1,26 +1,30 @@
-# DBKit - Go Database  Library
+# DBKit - Go Database Library
 
-DBKit 是一个基于 Go 语言的高性能、轻量级数据库操作库，灵感来自 Java 的 JFinal 框架的 ActiveRecord 模式。它提供了极其简洁、直观的 API，通过 `Record` 对象和链式调用，让数据库操作变得像操作对象一样简单。
+ DBKit 是一个基于 Go 语言的高性能、轻量级数据库操作库，灵感来自 Java 中 JFinal 框架的 ActiveRecord 模式。它提供了极其简洁、直观的 API，通过 `Record` 对象和链式调用，让数据库操作变得像操作对象一样简单。 
 
-🔗 **项目链接**：[https://github.com/zzguang83325/dbkit.git](https://github.com/zzguang83325/dbkit.git)
+  **项目链接**：https://github.com/zzguang83325/dbkit.git 
 
-## ✨ 特性
+## 特性
 
-- 🚀 **数据库支持**：支持 MySQL、PostgreSQL、SQLite3、Oracle、SQL Server。
-- 📦 **ActiveRecord 体验**：摆脱繁琐的 Struct 定义，使用灵活的 `Record` 对象进行 CRUD。
-- 🎯 **多数据库管理**：支持同时连接多个数据库，并能轻松在它们之间切换。
-- 📊 **内置分页**：针对不同数据库优化的分页查询实现。
-- 🔄 **事务支持**：提供简单易用的事务包装器及底层事务控制。
-- 📝 **调试友好**：内置 SQL 日志功能，支持多级日志输出。
-- 🔗 **连接池管理**：自动管理数据库连接池，性能优异。
+- **数据库支持**: 支持 MySQL、PostgreSQL、SQLite、SQL Server、Oracle
+- **多数据库管理**：支持同时连接多个数据库，并能轻松在它们之间切换。 
+- **ActiveRecord 体验**：摆脱繁琐的 Struct 定义，使用灵活的 `Record` 对象进行 CRUD。
+- **事务支持**:  提供简单易用的事务包装器及底层事务控制 
+- **自动类型转换**: 自动处理数据库类型与 Go 类型之间的转换
+- **参数化查询**: 自动处理 SQL 参数绑定，防止 SQL 注入
+- **分页查询**:  针对不同数据库优化的分页查询实现 
+- **日志记录**：内置 SQL 日志功能，支持多级日志输出 
+- **连接池管理**: 内置连接池管理，提高性能
 
-## 📦 安装
 
-```bash
+
+## 安装
+
+```
 go get github.com/zzguang83325/dbkit
 ```
 
-## 🚀 快速开始
+## 快速开始
 
 ```go
 package main
@@ -28,41 +32,135 @@ package main
 import (
     "fmt"
     "log"
+
     "github.com/zzguang83325/dbkit"
+    _ "github.com/go-sql-driver/mysql" // MySQL 驱动
+    //_ "github.com/denisenkom/go-mssqldb" // sqlserver驱动
+	//_ "github.com/lib/pq" // postgresql 驱动
+	//_ "github.com/mattn/go-sqlite3" // sqlite驱动
+	//_ "github.com/sijms/go-ora/v2" // oracle驱动
 )
 
 func main() {
-    // 1. 初始化数据库连接（默认注册为 "default"）
-    dbkit.OpenDatabase(dbkit.MySQL, "root:password@tcp(127.0.0.1:3306)/test?charset=utf8mb4", 10)
+    // 初始化数据库连接
+    err := dbkit.OpenDatabase(dbkit.MySQL, "root:password@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local", 10)
+    if err != nil {
+        log.Fatal(err)
+    }
     defer dbkit.Close()
-    
-    // 2. 插入数据
+
+    // 测试连接
+    if err := dbkit.Ping(); err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("数据库连接成功")
+
+    // 创建表
+    dbkit.Exec(`CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        age INT NOT NULL,
+        email VARCHAR(100) NOT NULL UNIQUE
+    )`)
+
+    // 创建Record, 并插入数据
     user := dbkit.NewRecord().
         Set("name", "张三").
         Set("age", 25).
         Set("email", "zhangsan@example.com")
     
     id, err := dbkit.Save("users", user)
-    if err == nil {
-        fmt.Println("插入成功，ID:", id)
+    if err != nil {
+        log.Fatal(err)
     }
-    
-    // 3. 查询数据
-    users, err := dbkit.Query("SELECT * FROM users WHERE age > ?", 18)
-    if err == nil {
-        for _, u := range users {
-            fmt.Printf("姓名: %s, 年龄: %d\n", u.Str("name"), u.Int("age"))
-        }
+    fmt.Println("插入成功，ID:", id)
+
+    // 查询数据
+    users, err := dbkit.Query("SELECT * FROM users where age > ?",18)
+    if err != nil {
+        log.Fatal(err)
     }
+    for _, u := range users {
+        fmt.Printf("ID: %d, Name: %s, Age: %d, Email: %s\n", 
+            u.Int64("id"), u.Str("name"), u.Int("age"), u.Str("email"))
+    }
+
+    // 更新数据
+    updateRecord := dbkit.NewRecord().Set("id", 1).Set("age", 26)
     
-    // 4. 更新数据
-    updateData := dbkit.NewRecord().Set("age", 26)
-    _, err = dbkit.Update("users", updateData, "id = ?", id)
+    //方法1
+    dbkit.Save("users",updateRecord)  //record里面包含主键时执行update,无主键时执行 insert  
     
-    // 5. 删除数据
-    _, err = dbkit.Delete("users", "id = ?", id)
+    //方法2
+    rows, err := dbkit.Update("users", updateRecord, "id = ?", id)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("更新成功，影响行数:", rows)
+
+    // 删除数据
+    rows, err = dbkit.Delete("users", "id = ?", id)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("删除成功，影响行数:", rows)
+    
+    // 原生sql插入数据
+    _, err = dbkit.Exec("INSERT INTO orders (user_id, order_date, total_amount, status) VALUES (?, CURDATE(), ?, 'completed')", 1, 5999.00)
+	if err != nil {
+		log.Println("插入订单失败: %v", err)
+	}
+    
+    // 分页查询
+
+	page := 1
+	perPage := 10
+	dataPage, totals, err := dbkit.Paginate(page, perPage, "SELECT *", "tablename", "status=?", "id ASC",1)
+	if err != nil {
+		log.Printf("分页查询失败: %v", err)
+	} else {
+		fmt.Printf("  第%d页（每页%d条），总数: %d\n", page, perPage, totals)
+		for i, d := range dataPage {
+			fmt.Printf("    %d. %s (ID: %d)\n", i+1, d.GetString("name"), d.GetInt("id"))
+		}
+	}
 }
 ```
+
+## 数据库驱动安装
+
+DBKit 支持以下数据库，你需要根据使用的数据库安装对应的驱动：
+
+| 数据库     | 驱动包                           | 安装命令                                  |
+| ---------- | -------------------------------- | ----------------------------------------- |
+| MySQL      | github.com/go-sql-driver/mysql   | `go get github.com/go-sql-driver/mysql`   |
+| PostgreSQL | github.com/lib/pq                | `go get github.com/lib/pq`                |
+| SQLite3    | github.com/mattn/go-sqlite3      | `go get github.com/mattn/go-sqlite3`      |
+| SQL Server | github.com/denisenkom/go-mssqldb | `go get github.com/denisenkom/go-mssqldb` |
+| Oracle     | github.com/sijms/go-ora/v2       | `go get github.com/sijms/go-ora/v2`       |
+
+在代码中导入驱动：
+
+```go
+// MySQL
+import _ "github.com/go-sql-driver/mysql"
+
+// PostgreSQL
+import _ "github.com/lib/pq"
+
+// SQLite3
+import _ "github.com/mattn/go-sqlite3"
+
+// SQL Server
+import _ "github.com/denisenkom/go-mssqldb"
+
+// Oracle
+import _ "github.com/sijms/go-ora/v2"
+```
+
+## 
+
+## 
 
 ## 📁 示例目录
 
@@ -82,7 +180,7 @@ cd examples/mysql
 go run main.go
 ```
 
-## 📖 核心文档
+## 📖 使用文档
 
 ### 1. 数据库初始化
 
@@ -116,7 +214,7 @@ dbkit.OpenDatabaseWithDBName("sqlserver", dbkit.SQLServer, "sqlserver://sa:12345
 
 
 
-// 使用 Use() 切换
+// 使用 Use() 直接调用指定数据库并链式调用函数
 dbkit.Use("main").Query("...")
 dbkit.Use("main").Exec("...")
 dbkit.Use("log_db").Save("logs", record)
@@ -159,12 +257,11 @@ DBKit 的分页查询非常智能，它会自动分析 SQL 语句，并尝试优
 // 方式 1：操作默认数据库
 // 参数：页码, 每页数量, SELECT 部分, 表名, WHERE 部分, ORDER BY 部分, 动态参数
 // 返回：记录列表, 总记录数, 错误
-users, total, err := dbkit.Paginate(1, 10, "id, name, age", "users", "age > ?", "id DESC", 18)
+users, total, err := dbkit.Paginate(1, 10, "select id, name, age", "users", "age > ?", "id DESC", 18)
 
 // 方式 2：指定数据库
 // 参数：页码, 每页数量, SELECT 部分, 表名, WHERE 部分, ORDER BY 部分, 动态参数
-db := dbkit.Use("default")
-users, total, err := db.Paginate(1, 10, "SELECT *", "users", "age > ?", "id DESC", 18)
+dbkit.Use("default").Paginate(1, 10, "SELECT *", "users", "age > ?", "id DESC", 18)
 ```
 
 ### 3. 插入与更新
@@ -348,223 +445,14 @@ record.Remove("is_vip")
 
 // 清空所有字段
 record.Clear()
+
+
 ```
 
-## 📚 API 文档
+## 
 
-### 1. 数据库连接与管理
+#### 
 
-#### 初始化连接
-```go
-// 单数据库 快捷初始化
-dbkit.OpenDatabase(driver DriverType, dsn string, maxOpen int)
-
-
-// 多数据库初始化
-dbkit.OpenDatabaseWithDBName(name string, driver DriverType, dsn string, maxOpen int)
-```
-
-#### 数据库切换与管理
-```go
-
-// 获取当前数据库
-currentDB := dbkit.GetCurrentDB()
-
-// 获取当前数据库名称
-currentDBName := dbkit.GetCurrentDBName()
-
-// 列出所有注册的数据库
-allDBs := dbkit.ListDatabases()
-
-// 关闭所有数据库连接
-dbkit.Close()
-```
-
-### 2. 查询操作
-
-#### 基本查询
-```go
-// 查询多条记录
-records, err := dbkit.Query(sql string, args ...interface{}) ([]Record, error)
-
-// 查询第一条记录
-record, err := dbkit.QueryFirst(sql string, args ...interface{}) (*Record, error)
-
-// 查询并返回 map 格式
-resultMap, err := dbkit.QueryMap(sql string, args ...interface{}) ([]map[string]interface{}, error)
-
-// 执行 SQL 语句
-result, err := dbkit.Exec(sql string, args ...interface{}) (sql.Result, error)
-
-// 统计记录数
-count, err := dbkit.Count(table string, where string, whereArgs ...interface{}) (int64, error)
-
-// 检查记录是否存在
-exists := dbkit.Exists(table string, where string, whereArgs ...interface{}) bool
-// 或者使用带错误返回的版本
-exists, err := dbkit.ExistsWithError(table string, where string, whereArgs ...interface{}) (bool, error)
-```
-
-#### 分页查询
-```go
-// 分页查询
-records, total, err := db.Paginate(page int, pageSize int, selectSql string, table string, whereSql string, orderBySql string, args ...interface{}) ([]Record, int64, error)
-```
-
-### 3. CRUD 操作
-
-#### 保存与更新
-```go
-// 保存记录（自动判断插入或更新）
-id, err := dbkit.Save(table string, record *Record)
-
-// 插入记录
-id, err := dbkit.Insert(table string, record *Record)
-
-// 更新记录
-rowsAffected, err := dbkit.Update(table string, record *Record, where string, whereArgs ...interface{})
-
-// 删除记录
-rowsAffected, err := dbkit.Delete(table string, where string, whereArgs ...interface{})
-```
-
-#### 批量操作
-```go
-// 默认批量插入（每批 100 条）
-totalRows, err := dbkit.BatchInsertDefault(table string, records []*Record)
-
-// 自定义批量大小
-totalRows, err := dbkit.BatchInsert(table string, records []*Record, batchSize int)
-```
-
-### 4. 事务操作
-
-#### 自动事务
-```go
-// 自动提交和回滚的事务
-err := dbkit.Transaction(func(tx *Tx) error {
-    // 在事务中执行操作
-    _, err := tx.Exec("UPDATE accounts SET balance = balance - 100 WHERE id = ?", 1)
-    if err != nil {
-        return err // 发生错误时自动回滚
-    }
-    
-    record := dbkit.NewRecord().Set("amount", 100).Set("from_id", 1)
-    _, err = tx.Save("transfer_logs", record)
-    return err // 成功时自动提交
-})
-```
-
-#### 手动事务
-```go
-// 开始事务
-tx, err := dbkit.BeginTransaction()
-
-// 在事务中执行操作
-_, err = tx.Exec(sql, args...)
-
-// 提交事务
-err = tx.Commit()
-
-// 回滚事务
-err = tx.Rollback()
-```
-
-### 5. 日志操作
-
-#### 日志配置
-```go
-
-// 初始化文件日志
-dbkit.InitLoggerWithFile(level string, logFilePath string)
-```
-
-#### 日志级别
-```go
-const (
-    LogLevelDebug LogLevel = "debug"
-    LogLevelInfo  LogLevel = "info"
-    LogLevelWarn  LogLevel = "warn"
-    LogLevelError LogLevel = "error"
-)
-```
-
-#### 日志输出
-```go
-// 调试日志
-dbkit.LogDebug(msg string, fields ...zap.Field)
-
-// 信息日志
-dbkit.LogInfo(msg string, fields ...zap.Field)
-
-// 警告日志
-dbkit.LogWarn(msg string, fields ...zap.Field)
-
-// 错误日志
-dbkit.LogError(msg string, fields ...zap.Field)
-```
-
-### 6. Record 对象
-
-#### 创建与设置
-```go
-// 创建新 Record
-record := dbkit.NewRecord()
-
-// 链式设置字段
-record.Set(column string, value interface{}) *Record
-```
-
-#### 类型安全获取
-```go
-// 获取字符串
-strVal := record.GetString(column string) // 或 record.Str(column string)
-
-// 获取整数
-intVal := record.GetInt(column string)     // 或 record.Int(column string)
-
-int64Val := record.GetInt64(column string) // 或 record.Int64(column string)
-
-// 获取浮点数
-floatVal := record.GetFloat(column string) // 或 record.Float(column string)
-
-// 获取布尔值
-boolVal := record.GetBool(column string)   // 或 record.Bool(column string)
-```
-
-#### 辅助方法
-```go
-// 获取原始值
-val := record.Get(column string)
-
-// 检查字段是否存在
-has := record.Has(column string)
-
-// 获取所有字段名
-keys := record.Keys()
-
-// 删除字段
-record.Remove(column string)
-
-// 清空所有字段
-record.Clear()
-```
-
-#### 转换方法
-```go
-// 转换为 map
-recordMap := record.ToMap() // 返回 map[string]interface{}
-
-// 转换为 JSON
-jsonStr := record.ToJson() // 返回 string
-
-// 从 JSON 解析
-err := record.FromJson(jsonStr) // 参数为 string，返回 error
-```
-
-## ⚖️ License
-
-MIT License
 
 ## 🔗 项目链接
 
