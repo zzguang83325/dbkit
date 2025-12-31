@@ -245,10 +245,17 @@ func (r *Record) Keys() []string {
 	return keys
 }
 
-// Remove removes a column from the Record
+// Remove removes a column from the Record with case-insensitive support
 func (r *Record) Remove(column string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	for k := range r.columns {
+		if strings.EqualFold(k, column) {
+			delete(r.columns, k)
+			return
+		}
+	}
 	delete(r.columns, column)
 }
 
@@ -275,24 +282,46 @@ func (r *Record) ToMap() map[string]interface{} {
 
 // ToJson converts the Record to JSON string
 func (r *Record) ToJson() string {
-	if r == nil {
-		return "{}"
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	data, err := json.Marshal(r.columns)
+	data, err := r.MarshalJSON()
 	if err != nil {
 		return "{}"
 	}
 	return string(data)
 }
 
-// FromJson parses JSON string into the Record
-func (r *Record) FromJson(jsonStr string) error {
+// MarshalJSON implements the json.Marshaler interface
+func (r *Record) MarshalJSON() ([]byte, error) {
+	if r == nil {
+		return []byte("{}"), nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return json.Marshal(r.columns)
+}
+
+// UnmarshalJSON implements the json.Unmarshaler interface
+func (r *Record) UnmarshalJSON(data []byte) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return json.Unmarshal([]byte(jsonStr), &r.columns)
+	if r.columns == nil {
+		r.columns = make(map[string]interface{})
+	}
+	return json.Unmarshal(data, &r.columns)
+}
+
+// FromJson parses JSON string into the Record
+func (r *Record) FromJson(jsonStr string) error {
+	return r.UnmarshalJSON([]byte(jsonStr))
+}
+
+// ToStruct converts the Record to a struct
+func (r *Record) ToStruct(dest interface{}) error {
+	return ToStruct(r, dest)
+}
+
+// FromStruct populates the Record from a struct
+func (r *Record) FromStruct(src interface{}) error {
+	return FromStruct(src, r)
 }
 
 // Str returns the column name in string format

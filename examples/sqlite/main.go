@@ -3,217 +3,227 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
+	"math/rand"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/zzguang83325/dbkit"
+	"github.com/zzguang83325/dbkit/examples/sqlite/models"
 )
 
 func main() {
-	fmt.Println("=== DBKit SQLite 示例 ===")
-
-	// 删除旧的测试数据库
-	os.Remove("test.db")
-
-	// 初始化数据库连接（SQLite）
-	fmt.Println("1. 初始化SQLite数据库...")
-	dbkit.OpenDatabase(dbkit.SQLite3, "file:test.db?cache=shared&mode=rwc", 10)
-	defer func() {
-		dbkit.Close()
-		os.Remove("test.db")
-	}()
-
-	// 检查连接
-	if err := dbkit.Ping(); err != nil {
-		log.Fatalf("数据库连接失败: %v", err)
-	}
-	fmt.Println("✓ SQLite数据库连接成功")
-
-	// 创建表
-	fmt.Println("\n2. 创建示例表...")
-	_, err := dbkit.Exec(`
-		CREATE TABLE IF NOT EXISTS products (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			price REAL DEFAULT 0,
-			stock INTEGER DEFAULT 0,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
+	dsn := "file:test_multi.db?cache=shared&mode=rwc"
+	err := dbkit.OpenDatabaseWithDBName("sqlite", dbkit.SQLite3, dsn, 10)
 	if err != nil {
-		log.Fatalf("创建表失败: %v", err)
+		log.Fatalf("SQLite数据库连接失败: %v", err)
 	}
-	fmt.Println("✓ 产品表创建成功")
+	dbkit.SetDebugMode(true)
 
-	// 插入产品
-	fmt.Println("\n3. 插入产品数据...")
+	setupTable()
+	prepareData()
+	demoRecordOperations()
+	demoDbModelOperations()
+	demoChainOperations()
+	demoCacheOperations()
+	demoUpdateDeleteOperations()
+}
 
-	product1 := dbkit.NewRecord()
-	product1.Set("name", "iPhone 15")
-	product1.Set("price", 6999.00)
-	product1.Set("stock", 100)
+func setupTable() {
+	sql := `
+	CREATE TABLE IF NOT EXISTS demo (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT,
+		age INTEGER,
+		salary REAL,
+		is_active INTEGER,
+		birthday TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		metadata TEXT
+	)`
+	dbkit.Use("sqlite").Exec(sql)
+}
 
-	product2 := dbkit.NewRecord()
-	product2.Set("name", "MacBook Pro")
-	product2.Set("price", 14999.00)
-	product2.Set("stock", 50)
-
-	product3 := dbkit.NewRecord()
-	product3.Set("name", "iPad Air")
-	product3.Set("price", 4799.00)
-	product3.Set("stock", 200)
-
-	products := []*dbkit.Record{product1, product2, product3}
-
-	total, err := dbkit.BatchInsertDefault("products", products)
-	if err != nil {
-		log.Fatalf("批量插入失败: %v", err)
+func prepareData() {
+	count, _ := dbkit.Count("demo", "")
+	if count >= 100 {
+		fmt.Printf("SQLite: Already has %d rows, skipping data preparation.\n", count)
+		return
 	}
-	fmt.Printf("✓ 插入%d个产品\n", total)
+	fmt.Println("SQLite: Inserting 110 rows of data...")
+	records := make([]*dbkit.Record, 0, 110)
+	for i := 1; i <= 110; i++ {
+		record := dbkit.NewRecord().
+			Set("name", fmt.Sprintf("SQLite_User_%d", i)).
+			Set("age", 18+rand.Intn(40)).
+			Set("salary", 3000.0+float64(i)).
+			Set("is_active", i%2 == 0).
+			Set("birthday", time.Now().Format("2006-01-02")).
+			Set("metadata", "SQLite Meta")
+		records = append(records, record)
+	}
+	dbkit.Use("sqlite").BatchInsert("demo", records, 100)
+	fmt.Println("SQLite: Data preparation complete.")
+}
 
-	// 查询所有产品
-	fmt.Println("\n4. 查询所有产品:")
-	allProducts, err := dbkit.Query("SELECT * FROM products")
+func demoRecordOperations() {
+	fmt.Println("\n--- SQLite Record Operations ---")
+	records, err := dbkit.Query("SELECT * FROM demo WHERE age > ? LIMIT 5", 30)
 	if err != nil {
-		log.Printf("查询所有产品失败: %v", err)
+		log.Printf("SQLite Query failed: %v", err)
+		return
+	}
+	fmt.Printf("Query returned %d records\n", len(records))
+}
+
+func demoDbModelOperations() {
+	fmt.Println("\n--- SQLite DbModel CRUD Operations ---")
+	model := &models.Demo{}
+
+	// 1. Insert
+	newUser := &models.Demo{
+		Name:      "New_DbModel_User",
+		Age:       25,
+		Salary:    5000.5,
+		IsActive:  1,
+		Birthday:  time.Now().Format("2006-01-02"),
+		CreatedAt: time.Now(),
+		Metadata:  "DbModel Meta",
+	}
+	id, err := newUser.Insert()
+	if err != nil {
+		log.Printf("SQLite DbModel Insert failed: %v", err)
+		return
+	}
+	fmt.Printf("SQLite DbModel Insert: ID = %d\n", id)
+	newUser.ID = id
+
+	// 2. FindFirst (Read)
+	foundUser, err := model.FindFirst("name = ?", "New_DbModel_User")
+	if err != nil {
+		log.Printf("SQLite DbModel FindFirst failed: %v", err)
+	} else if foundUser != nil {
+		fmt.Printf("SQLite DbModel FindFirst: Found user %s, Age: %d\n", foundUser.Name, foundUser.Age)
+	}
+
+	// 3. Update
+	foundUser.Age = 30
+	foundUser.Salary = 6000.7
+	affected, err := foundUser.Update()
+	if err != nil {
+		log.Printf("SQLite DbModel Update failed: %v", err)
 	} else {
-		for _, p := range allProducts {
-			fmt.Printf("  - %s: ¥%.2f (库存: %d)\n",
-				p.GetString("name"),
-				p.GetFloat("price"),
-				p.GetInt("stock"))
-		}
+		fmt.Printf("SQLite DbModel Update: %d rows affected\n", affected)
 	}
 
-	// 查询价格大于5000的产品
-	fmt.Println("\n5. 查询高价产品（价格 > 5000）:")
-	expensiveProducts, err := dbkit.Query("SELECT * FROM products WHERE price > ?", 5000)
+	// 4. Find (Read)
+	results, err := model.Find("age >= ?", "id DESC", 25)
 	if err != nil {
-		log.Printf("查询高价产品失败: %v", err)
+		log.Printf("SQLite DbModel Find failed: %v", err)
 	} else {
-		for _, p := range expensiveProducts {
-			fmt.Printf("  - %s: ¥%.2f\n", p.GetString("name"), p.GetFloat("price"))
-		}
+		fmt.Printf("SQLite DbModel Find: %d results, first user: %s\n", len(results), results[0].Name)
 	}
 
-	// 更新库存
-	fmt.Println("\n6. 更新产品库存...")
-	record := dbkit.NewRecord()
-	record.Set("stock", 99)
-	affected, err := dbkit.Update("products", record, "name = ?", "iPhone 15")
+	// 5. Paginate (Read)
+	page, err := model.Paginate(1, 10, "age > ?", "id ASC", 20)
 	if err != nil {
-		log.Fatalf("更新失败: %v", err)
-	}
-	fmt.Printf("✓ 更新成功，影响行数: %d\n", affected)
-
-	// 验证更新
-	fmt.Println("\n7. 验证更新结果:")
-	updatedProduct, err := dbkit.QueryFirst("SELECT * FROM products WHERE name = ?", "iPhone 15")
-	if err != nil {
-		log.Printf("验证更新结果失败: %v", err)
-	} else if updatedProduct != nil {
-		fmt.Printf("  iPhone 15 库存: %d\n", updatedProduct.GetInt("stock"))
-	}
-
-	// 统计查询
-	fmt.Println("\n8. 统计查询...")
-	totalCount, err := dbkit.Count("products", "")
-	if err != nil {
-		log.Printf("统计产品总数失败: %v", err)
+		log.Printf("SQLite DbModel Paginate failed: %v", err)
 	} else {
-		fmt.Printf("  产品总数: %d\n", totalCount)
+		fmt.Printf("SQLite DbModel Paginate: Total %d rows, current page size %d\n", page.TotalRow, len(page.List))
 	}
 
-	totalStock, err := dbkit.Count("products", "stock > ?", 100)
+	// 6. Delete
+	affected, err = foundUser.Delete()
 	if err != nil {
-		log.Printf("统计库存大于100的产品数失败: %v", err)
+		log.Printf("SQLite DbModel Delete failed: %v", err)
 	} else {
-		fmt.Printf("  库存大于100的产品数: %d\n", totalStock)
+		fmt.Printf("SQLite DbModel Delete: %d rows affected\n", affected)
 	}
+}
 
-	// 检查产品是否存在
-	fmt.Println("\n9. 检查产品是否存在...")
-	exists := dbkit.Exists("products", "name = ?", "iPhone 15")
-	fmt.Printf("  iPhone 15是否存在: %v\n", exists)
-
-	exists = dbkit.Exists("products", "name = ?", "不存在的产品")
-	fmt.Printf("  不存在的产品是否存在: %v\n", exists)
-
-	// 使用事务
-	fmt.Println("\n10. 事务操作示例...")
-	tx, err := dbkit.BeginTransaction()
+func demoChainOperations() {
+	fmt.Println("\n--- SQLite Chain Operations ---")
+	page, err := dbkit.Use("sqlite").Table("demo").Where("age > ?", 20).Paginate(1, 10)
 	if err != nil {
-		log.Fatalf("开启事务失败: %v", err)
+		log.Printf("SQLite Chain Paginate failed: %v", err)
+		return
 	}
+	fmt.Printf("SQLite Chain Paginate: Total %d rows, current page size %d\n", page.TotalRow, len(page.List))
+}
 
-	// 批量更新库存（使用新变量避免类型冲突）
-	queriedProducts, err := dbkit.Query("SELECT * FROM products")
+func demoCacheOperations() {
+	fmt.Println("\n--- SQLite Cache Operations ---")
+	var results []*models.Demo
+	// First call - should hit DB and save to cache
+	start := time.Now()
+	err := dbkit.Use("sqlite").Cache("sqlite_demo_cache", 60).Table("demo").Where("age > ?", 35).FindToDbModel(&results)
+
 	if err != nil {
-		tx.Rollback()
-		log.Fatalf("查询产品失败: %v", err)
-	}
-	for _, p := range queriedProducts {
-		stock := p.GetInt("stock")
-		stock--
-		_, err = dbkit.ExecTx(tx, "UPDATE products SET stock = ? WHERE id = ?", stock, p.Get("id"))
-		if err != nil {
-			tx.Rollback()
-			log.Fatalf("事务更新失败: %v", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		log.Fatalf("提交事务失败: %v", err)
-	}
-	fmt.Println("✓ 事务更新成功（所有产品库存-1）")
-
-	// 显示更新后的库存
-	fmt.Println("\n11. 更新后的产品列表:")
-	products = []*dbkit.Record{}
-	queriedProducts, err = dbkit.Query("SELECT * FROM products")
-	if err != nil {
-		log.Printf("查询更新后产品列表失败: %v", err)
+		log.Printf("SQLite Cache Find (1st) failed: %v", err)
 	} else {
-		for _, p := range queriedProducts {
-			rec := p
-			products = append(products, &rec)
-			fmt.Printf("  - %s: 库存 %d\n", p.GetString("name"), p.GetInt("stock"))
-		}
+		fmt.Printf("SQLite Cache Find (1st): %d results, took %v\n", len(results), time.Since(start))
 	}
 
-	// 删除产品
-	fmt.Println("\n12. 删除产品...")
-	deleted, err := dbkit.Delete("products", "name = ?", "iPad Air")
+	// Second call - should hit cache
+	start = time.Now()
+	err = dbkit.Use("sqlite").Cache("sqlite_demo_cache", 60).Table("demo").Where("age > ?", 35).FindToDbModel(&results)
 	if err != nil {
-		log.Fatalf("删除失败: %v", err)
-	}
-	fmt.Printf("✓ 删除iPad Air，影响行数: %d\n", deleted)
-
-	// Record的高级用法
-	fmt.Println("\n13. Record高级用法示例...")
-	product, err := dbkit.QueryFirst("SELECT * FROM products WHERE name = ?", "MacBook Pro")
-	if err != nil {
-		log.Printf("查询产品失败: %v", err)
-	} else if product != nil {
-		fmt.Printf("  产品名称: %s\n", product.Str("name"))
-		fmt.Printf("  产品价格: %.2f\n", product.Float("price"))
-		fmt.Printf("  库存数量: %d\n", product.Int("stock"))
-		fmt.Printf("  是否有货: %v\n", product.Bool("stock") && product.GetInt("stock") > 0)
-		fmt.Printf("  所有字段: %v\n", product.Keys())
-		fmt.Printf("  JSON格式: %s\n", product.ToJson())
-	}
-
-	// 分页查询
-	fmt.Println("\n14. 分页查询...")
-	page1, totalProducts, err := dbkit.Paginate(1, 1, "SELECT *", "products", "", "id ASC")
-	if err != nil {
-		log.Printf("分页查询失败: %v", err)
+		log.Printf("SQLite Cache Find (2nd) failed: %v", err)
 	} else {
-		fmt.Printf("  第1页，每页1条，总数: %d\n", totalProducts)
-		for _, p := range page1 {
-			fmt.Printf("    - %s\n", p.GetString("name"))
-		}
+		fmt.Printf("SQLite Cache Find (2nd): %d results, took %v (from cache)\n", len(results), time.Since(start))
 	}
 
-	fmt.Println("\n=== SQLite 示例完成 ===")
+	// Test Paginate cache
+	fmt.Println("\n--- SQLite Paginate Cache Operations ---")
+	start = time.Now()
+	page, err := dbkit.Use("sqlite").Cache("sqlite_page_cache", 60).Table("demo").Where("age > ?", 30).Paginate(1, 10)
+	if err != nil {
+		log.Printf("SQLite Paginate Cache (1st) failed: %v", err)
+	} else {
+		fmt.Printf("SQLite Paginate Cache (1st): %d results, took %v\n", len(page.List), time.Since(start))
+	}
+
+	start = time.Now()
+	page, err = dbkit.Use("sqlite").Cache("sqlite_page_cache", 60).Table("demo").Where("age > ?", 30).Paginate(1, 10)
+	if err != nil {
+		log.Printf("SQLite Paginate Cache (2nd) failed: %v", err)
+	} else {
+		fmt.Printf("SQLite Paginate Cache (2nd): %d results, took %v (from cache)\n", len(page.List), time.Since(start))
+	}
+
+	// Test Count cache
+	fmt.Println("\n--- SQLite Count Cache Operations ---")
+	start = time.Now()
+	count, err := dbkit.Use("sqlite").Cache("sqlite_count_cache", 60).Table("demo").Where("age > ?", 30).Count()
+	if err != nil {
+		log.Printf("SQLite Count Cache (1st) failed: %v", err)
+	} else {
+		fmt.Printf("SQLite Count Cache (1st): %d, took %v\n", count, time.Since(start))
+	}
+
+	start = time.Now()
+	count, err = dbkit.Use("sqlite").Cache("sqlite_count_cache", 60).Table("demo").Where("age > ?", 30).Count()
+	if err != nil {
+		log.Printf("SQLite Count Cache (2nd) failed: %v", err)
+	} else {
+		fmt.Printf("SQLite Count Cache (2nd): %d, took %v (from cache)\n", count, time.Since(start))
+	}
+}
+
+func demoUpdateDeleteOperations() {
+	fmt.Println("\n--- SQLite Update/Delete Operations ---")
+	// Update
+	affected, err := dbkit.Use("sqlite").Table("demo").Where("name = ?", "SQLite_User_1").Update(dbkit.NewRecord().Set("age", 99))
+	if err != nil {
+		log.Printf("SQLite Update failed: %v", err)
+	} else {
+		fmt.Printf("SQLite Update: %d rows affected\n", affected)
+	}
+
+	// Delete
+	affected, err = dbkit.Use("sqlite").Table("demo").Where("name = ?", "SQLite_User_2").Delete()
+	if err != nil {
+		log.Printf("SQLite Delete failed: %v", err)
+	} else {
+		fmt.Printf("SQLite Delete: %d rows affected\n", affected)
+	}
 }

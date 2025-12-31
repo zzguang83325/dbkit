@@ -1,114 +1,154 @@
 package dbkit
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
 	"os"
-
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
 )
+
+// LogLevel defines the severity of the log
+type LogLevel int
+
+const (
+	LevelDebug LogLevel = iota
+	LevelInfo
+	LevelWarn
+	LevelError
+)
+
+func (l LogLevel) String() string {
+	switch l {
+	case LevelDebug:
+		return "DEBUG"
+	case LevelInfo:
+		return "INFO"
+	case LevelWarn:
+		return "WARN"
+	case LevelError:
+		return "ERROR"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// Logger interface defines simple behavior for logging with structured fields
+type Logger interface {
+	// Log records a log entry. fields is optional (can be nil).
+	Log(level LogLevel, msg string, fields map[string]interface{})
+}
+
+// slogLogger is an adapter for log/slog
+type slogLogger struct {
+	logger *slog.Logger
+}
+
+func (s *slogLogger) Log(level LogLevel, msg string, fields map[string]interface{}) {
+	l := s.logger
+	if l == nil {
+		l = slog.Default()
+	}
+
+	// Convert map to slice of key-value pairs for slog with stable order
+	var args []interface{}
+	if len(fields) > 0 {
+		args = make([]interface{}, 0, len(fields)*2)
+
+		// Priority keys to print first in specific order
+		priorityKeys := []string{"db", "duration", "sql", "args", "error"}
+		processedKeys := make(map[string]bool)
+
+		// 1. Process priority keys first
+		for _, k := range priorityKeys {
+			if v, ok := fields[k]; ok {
+				if k == "args" {
+					if slice, ok := v.([]interface{}); ok {
+						v = formatValue(slice)
+					}
+				}
+				args = append(args, k, v)
+				processedKeys[k] = true
+			}
+		}
+
+		// 2. Sort remaining keys
+		remainingKeys := make([]string, 0, len(fields)-len(processedKeys))
+		for k := range fields {
+			if !processedKeys[k] {
+				remainingKeys = append(remainingKeys, k)
+			}
+		}
+		sort.Strings(remainingKeys)
+
+		// 3. Process remaining keys
+		for _, k := range remainingKeys {
+			v := fields[k]
+			args = append(args, k, v)
+		}
+	}
+
+	switch level {
+	case LevelDebug:
+		l.Debug(msg, args...)
+	case LevelInfo:
+		l.Info(msg, args...)
+	case LevelWarn:
+		l.Warn(msg, args...)
+	case LevelError:
+		l.Error(msg, args...)
+	}
+}
+
+// NewSlogLogger creates a Logger that uses log/slog
+func NewSlogLogger(logger *slog.Logger) Logger {
+	return &slogLogger{logger: logger}
+}
+
+// formatValue formats a log field value
+func formatValue(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		return fmt.Sprintf("'%s'", val)
+	case []interface{}:
+		var strs []string
+		for _, item := range val {
+			if s, ok := item.(string); ok {
+				strs = append(strs, fmt.Sprintf("'%s'", s))
+			} else {
+				strs = append(strs, fmt.Sprintf("%v", item))
+			}
+		}
+		return fmt.Sprintf("[%s]", strings.Join(strs, ", "))
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
 
 var (
-	logger *zap.Logger
-	sugar  *zap.SugaredLogger
-	debug  bool
-	atom   zap.AtomicLevel
+	currentLogger Logger = &slogLogger{logger: nil}
+	debug         bool
+	re            = regexp.MustCompile(`\s+`)
 )
 
-func init() {
-	atom = zap.NewAtomicLevelAt(zap.InfoLevel)
+// SetLogger sets the global logger
+func SetLogger(l Logger) {
+	currentLogger = l
 }
 
-// InitLogger initializes the logger with the specified level
-// level can be: "debug", "info", "warn", "error"
-// Outputs to console only
-func InitLogger(level string) {
-	InitLoggerWithFile(level, "")
-}
-
-// InitLoggerWithFile initializes the logger with the specified level and file output
-// level can be: "debug", "info", "warn", "error"
-// filePath is the log file path (empty string means console output only)
-func InitLoggerWithFile(level string, filePath string) {
-	// Parse log level
-	var zapLevel zapcore.Level
-	switch level {
-	case "debug":
-		zapLevel = zapcore.DebugLevel
-		debug = true
-	case "info":
-		zapLevel = zapcore.InfoLevel
-	case "warn":
-		zapLevel = zapcore.WarnLevel
-	case "error":
-		zapLevel = zapcore.ErrorLevel
-	default:
-		zapLevel = zapcore.InfoLevel
-	}
-	atom.SetLevel(zapLevel)
-
-	// Create encoder config
-	encoderConfig := zapcore.EncoderConfig{
-		TimeKey:        "time",
-		LevelKey:       "level",
-		NameKey:        "logger",
-		CallerKey:      "caller",
-		MessageKey:     "msg",
-		StacktraceKey:  "stacktrace",
-		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeLevel:    zapcore.CapitalLevelEncoder,
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		EncodeDuration: zapcore.SecondsDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
-	}
-
-	// Determine write syncer
-	var writeSyncer zapcore.WriteSyncer
-	if filePath != "" {
-		// Open log file (append mode, create if not exists)
-		file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			// Fallback to console if file creation fails
-			writeSyncer = zapcore.AddSync(os.Stdout)
-		} else {
-			// Write to both console and file
-			writeSyncer = zapcore.NewMultiWriteSyncer(
-				zapcore.AddSync(os.Stdout),
-				zapcore.AddSync(file),
-			)
+// SetDebugMode enables or disables debug mode
+func SetDebugMode(enabled bool) {
+	debug = enabled
+	if enabled {
+		// 如果全局 slog 还不支持 Debug 级别，则强制设置一个输出到标准输出的 Debug 级别 slog
+		if !slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 		}
-	} else {
-		// Console only
-		writeSyncer = zapcore.AddSync(os.Stdout)
 	}
-
-	// Create core
-	core := zapcore.NewCore(
-		zapcore.NewConsoleEncoder(encoderConfig),
-		writeSyncer,
-		atom,
-	)
-
-	// Create logger
-	logger = zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
-	sugar = logger.Sugar()
-}
-
-// GetLogger returns the zap logger
-func GetLogger() *zap.Logger {
-	if logger == nil {
-		// Initialize with default info level if not initialized
-		InitLogger("info")
-	}
-	return logger
-}
-
-// GetSugarLogger returns the zap sugared logger
-func GetSugarLogger() *zap.SugaredLogger {
-	if sugar == nil {
-		// Initialize with default info level if not initialized
-		InitLogger("info")
-	}
-	return sugar
 }
 
 // IsDebugEnabled returns true if debug mode is enabled
@@ -116,71 +156,137 @@ func IsDebugEnabled() bool {
 	return debug
 }
 
-// SetDebugMode enables or disables debug mode
-func SetDebugMode(enabled bool) {
-	debug = enabled
-	if enabled {
-		atom.SetLevel(zap.DebugLevel)
-	} else {
-		atom.SetLevel(zap.InfoLevel)
+// cleanSQL removes newlines, tabs and multiple spaces from SQL string
+func cleanSQL(sql string) string {
+	return strings.TrimSpace(re.ReplaceAllString(sql, " "))
+}
+
+// LogSQL logs SQL statement, parameters and execution time in debug mode
+func LogSQL(dbName string, sql string, args []interface{}, duration time.Duration) {
+	if debug {
+		fields := map[string]interface{}{
+			"db":       dbName,
+			"sql":      cleanSQL(sql),
+			"duration": duration.String(),
+		}
+		if len(args) > 0 {
+			fields["args"] = args
+		}
+		currentLogger.Log(LevelDebug, "SQL log", fields)
 	}
 }
 
-// LogSQL logs SQL statement and parameters in debug mode
-func LogSQL(dbName string, sql string, args []interface{}) {
-	if debug && logger != nil {
-		logger.Debug("SQL executed",
-			zap.String("db", dbName),
-			zap.String("sql", sql),
-			zap.Any("args", args),
-		)
+// LogSQLError logs SQL error with execution time
+func LogSQLError(dbName string, sql string, args []interface{}, duration time.Duration, err error) {
+	fields := map[string]interface{}{
+		"db":       dbName,
+		"sql":      cleanSQL(sql),
+		"duration": duration.String(),
+		"error":    err.Error(),
 	}
-}
-
-// LogSQLError logs SQL error
-func LogSQLError(dbName string, sql string, args []interface{}, err error) {
-	if logger != nil {
-		logger.Error("SQL execution failed",
-			zap.String("db", dbName),
-			zap.String("sql", sql),
-			zap.Any("args", args),
-			zap.Error(err),
-		)
+	if len(args) > 0 {
+		fields["args"] = args
 	}
+	currentLogger.Log(LevelError, "SQL failed log", fields)
 }
 
 // LogInfo logs info message
-func LogInfo(msg string, fields ...zap.Field) {
-	if logger != nil {
-		logger.Info(msg, fields...)
+func LogInfo(msg string, fields ...map[string]interface{}) {
+	var f map[string]interface{}
+	if len(fields) > 0 {
+		f = fields[0]
 	}
+	currentLogger.Log(LevelInfo, msg, f)
 }
 
 // LogWarn logs warning message
-func LogWarn(msg string, fields ...zap.Field) {
-	if logger != nil {
-		logger.Warn(msg, fields...)
+func LogWarn(msg string, fields ...map[string]interface{}) {
+	var f map[string]interface{}
+	if len(fields) > 0 {
+		f = fields[0]
 	}
+	currentLogger.Log(LevelWarn, msg, f)
 }
 
 // LogError logs error message
-func LogError(msg string, fields ...zap.Field) {
-	if logger != nil {
-		logger.Error(msg, fields...)
+func LogError(msg string, fields ...map[string]interface{}) {
+	var f map[string]interface{}
+	if len(fields) > 0 {
+		f = fields[0]
 	}
+	currentLogger.Log(LevelError, msg, f)
 }
 
 // LogDebug logs debug message
-func LogDebug(msg string, fields ...zap.Field) {
-	if logger != nil && debug {
-		logger.Debug(msg, fields...)
+func LogDebug(msg string, fields ...map[string]interface{}) {
+	if debug {
+		var f map[string]interface{}
+		if len(fields) > 0 {
+			f = fields[0]
+		}
+		currentLogger.Log(LevelDebug, msg, f)
 	}
 }
 
 // Sync flushes any buffered log entries
-func Sync() error {
-	if logger != nil {
-		return logger.Sync()
+func Sync() {
+	if s, ok := currentLogger.(interface{ Sync() error }); ok {
+		_ = s.Sync()
 	}
-	return nil
+}
+
+// InitLogger initializes the logger with a specific level to stdout
+// InitLogger initializes the global slog logger with a specific level to console
+func InitLogger(level string) {
+	// Determine log level
+	slogLevel := slog.LevelInfo
+	if strings.EqualFold(level, "debug") {
+		slogLevel = slog.LevelDebug
+		SetDebugMode(true)
+	} else if strings.EqualFold(level, "warn") {
+		slogLevel = slog.LevelWarn
+	} else if strings.EqualFold(level, "error") {
+		slogLevel = slog.LevelError
+	}
+
+	// Set global slog default with TextHandler to stdout
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slogLevel,
+	})
+	slog.SetDefault(slog.New(handler))
+
+	// Reset currentLogger to use the new global default
+	SetLogger(&slogLogger{logger: nil})
+}
+
+// InitLoggerWithFile initializes the logger to both console and a file using slog
+func InitLoggerWithFile(level string, filePath string) {
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dbkit: Failed to open log file: %v\n", err)
+		return
+	}
+
+	// Determine log level
+	slogLevel := slog.LevelInfo
+	if strings.EqualFold(level, "debug") {
+		slogLevel = slog.LevelDebug
+		SetDebugMode(true)
+	} else if strings.EqualFold(level, "warn") {
+		slogLevel = slog.LevelWarn
+	} else if strings.EqualFold(level, "error") {
+		slogLevel = slog.LevelError
+	}
+
+	// Create a multi-writer for both console and file
+	multiWriter := io.MultiWriter(os.Stdout, file)
+
+	// Set global slog default with TextHandler
+	handler := slog.NewTextHandler(multiWriter, &slog.HandlerOptions{
+		Level: slogLevel,
+	})
+	slog.SetDefault(slog.New(handler))
+
+	// Reset currentLogger to use the new global default
+	SetLogger(&slogLogger{logger: nil})
 }

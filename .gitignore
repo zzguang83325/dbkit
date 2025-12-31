@@ -2,4 +2,6 @@
 **/*.db
 .idea
 .vscode
+*.exe
 tests/
+exclude/
