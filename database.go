@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	// Import database drivers
 	// _ "github.com/go-sql-driver/mysql"
 	// _ "github.com/lib/pq"
 	// _ "github.com/mattn/go-sqlite3"
@@ -67,14 +66,26 @@ func IsValidDriver(driver DriverType) bool {
 
 // DB represents a database connection with chainable methods
 type DB struct {
-	dbMgr   *dbManager
-	lastErr error
+	dbMgr     *dbManager
+	lastErr   error
+	cacheName string
+	cacheTTL  time.Duration
+}
+
+// GetConfig returns the database configuration
+func (db *DB) GetConfig() (*Config, error) {
+	if db == nil || db.dbMgr == nil {
+		return nil, fmt.Errorf("database or database manager is nil")
+	}
+	return db.dbMgr.GetConfig()
 }
 
 // Tx represents a database transaction with chainable methods
 type Tx struct {
-	tx    *sql.Tx
-	dbMgr *dbManager
+	tx        *sql.Tx
+	dbMgr     *dbManager
+	cacheName string
+	cacheTTL  time.Duration
 }
 
 // sqlExecutor is an internal interface for executing SQL commands
@@ -237,18 +248,17 @@ func (mgr *dbManager) prepareQuerySQL(querySQL string, args ...interface{}) (str
 
 func (mgr *dbManager) query(executor sqlExecutor, querySQL string, args ...interface{}) ([]Record, error) {
 	querySQL, args = mgr.prepareQuerySQL(querySQL, args...)
-	LogSQL(mgr.name, querySQL, args)
-
+	start := time.Now()
 	rows, err := executor.Query(querySQL, args...)
+	mgr.logTrace(start, querySQL, args, err)
+
 	if err != nil {
-		LogSQLError(mgr.name, querySQL, args, err)
 		return nil, err
 	}
 	defer rows.Close()
 
 	results, err := scanRecords(rows, mgr.config.Driver)
 	if err != nil {
-		LogSQLError(mgr.name, querySQL, args, err)
 		return nil, err
 	}
 	return results, nil
@@ -272,18 +282,17 @@ func (mgr *dbManager) queryFirstInternal(executor sqlExecutor, querySQL string, 
 
 func (mgr *dbManager) queryMap(executor sqlExecutor, querySQL string, args ...interface{}) ([]map[string]interface{}, error) {
 	querySQL, args = mgr.prepareQuerySQL(querySQL, args...)
-	LogSQL(mgr.name, querySQL, args)
-
+	start := time.Now()
 	rows, err := executor.Query(querySQL, args...)
+	mgr.logTrace(start, querySQL, args, err)
+
 	if err != nil {
-		LogSQLError(mgr.name, querySQL, args, err)
 		return nil, err
 	}
 	defer rows.Close()
 
 	results, err := scanMaps(rows, mgr.config.Driver)
 	if err != nil {
-		LogSQLError(mgr.name, querySQL, args, err)
 		return nil, err
 	}
 	return results, nil
@@ -325,11 +334,11 @@ func (mgr *dbManager) addLimitOne(querySQL string) string {
 func (mgr *dbManager) exec(executor sqlExecutor, querySQL string, args ...interface{}) (sql.Result, error) {
 	querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
 	args = mgr.sanitizeArgs(querySQL, args)
-	LogSQL(mgr.name, querySQL, args)
-
+	start := time.Now()
 	result, err := executor.Exec(querySQL, args...)
+	mgr.logTrace(start, querySQL, args, err)
+
 	if err != nil {
-		LogSQLError(mgr.name, querySQL, args, err)
 		return nil, err
 	}
 	return result, nil
@@ -760,14 +769,16 @@ func (mgr *dbManager) nativeUpsert(executor sqlExecutor, table string, record *R
 	}
 
 	sqlStr = mgr.convertPlaceholder(sqlStr, driver)
-	LogSQL(mgr.name, sqlStr, values)
+	values = mgr.sanitizeArgs(sqlStr, values)
 
 	// 处理 PostgreSQL 的 ID 返回
 	if driver == PostgreSQL {
 		if len(pks) == 1 && strings.EqualFold(pks[0], "id") {
 			sqlStr += " RETURNING id"
 			var id int64
+			start := time.Now()
 			err := executor.QueryRow(sqlStr, values...).Scan(&id)
+			mgr.logTrace(start, sqlStr, values, err)
 			if err != nil {
 				return 0, err
 			}
@@ -775,9 +786,10 @@ func (mgr *dbManager) nativeUpsert(executor sqlExecutor, table string, record *R
 		}
 	}
 
+	start := time.Now()
 	res, err := executor.Exec(sqlStr, values...)
+	mgr.logTrace(start, sqlStr, values, err)
 	if err != nil {
-		LogSQLError(mgr.name, sqlStr, values, err)
 		return 0, err
 	}
 
@@ -876,14 +888,14 @@ func (mgr *dbManager) mergeUpsert(executor sqlExecutor, table string, record *Re
 	}
 
 	sqlStr = mgr.convertPlaceholder(sqlStr, driver)
+	values = mgr.sanitizeArgs(sqlStr, values)
 
 	// 对于 SQL Server，如果我们需要获取生成的 ID，可以使用 OUTPUT 子句
 	// 但这会改变执行方式（从 Exec 变为 QueryRow），为了保持简单，我们先解决报错问题
-	LogSQL(mgr.name, sqlStr, values)
-
+	start := time.Now()
 	res, err := executor.Exec(sqlStr, values...)
+	mgr.logTrace(start, sqlStr, values, err)
 	if err != nil {
-		LogSQLError(mgr.name, sqlStr, values, err)
 		return 0, err
 	}
 
@@ -920,11 +932,12 @@ func (mgr *dbManager) insert(executor sqlExecutor, table string, record *Record)
 		if len(pks) == 1 && strings.EqualFold(pks[0], "id") {
 			querySQL += fmt.Sprintf(" VALUES (%s) RETURNING %s", joinStrings(placeholders), pks[0])
 			querySQL = mgr.convertPlaceholder(querySQL, driver)
-			LogSQL(mgr.name, querySQL, values)
+			values = mgr.sanitizeArgs(querySQL, values)
 			var id int64
+			start := time.Now()
 			err := executor.QueryRow(querySQL, values...).Scan(&id)
+			mgr.logTrace(start, querySQL, values, err)
 			if err != nil {
-				LogSQLError(mgr.name, querySQL, values, err)
 				return 0, err
 			}
 			return id, nil
@@ -932,10 +945,11 @@ func (mgr *dbManager) insert(executor sqlExecutor, table string, record *Record)
 		// 否则执行普通插入
 		querySQL += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
 		querySQL = mgr.convertPlaceholder(querySQL, driver)
-		LogSQL(mgr.name, querySQL, values)
+		values = mgr.sanitizeArgs(querySQL, values)
+		start := time.Now()
 		res, err := executor.Exec(querySQL, values...)
+		mgr.logTrace(start, querySQL, values, err)
 		if err != nil {
-			LogSQLError(mgr.name, querySQL, values, err)
 			return 0, err
 		}
 		return res.RowsAffected()
@@ -948,22 +962,23 @@ func (mgr *dbManager) insert(executor sqlExecutor, table string, record *Record)
 		if len(pks) == 1 && identityCol != "" && strings.EqualFold(pks[0], identityCol) {
 			querySQL += fmt.Sprintf(" VALUES (%s); SELECT SCOPE_IDENTITY()", joinStrings(placeholders))
 			querySQL = mgr.convertPlaceholder(querySQL, driver)
-			LogSQL(mgr.name, querySQL, values)
+			values = mgr.sanitizeArgs(querySQL, values)
 			var id int64
+			start := time.Now()
 			err := executor.QueryRow(querySQL, values...).Scan(&id)
+			mgr.logTrace(start, querySQL, values, err)
 			if err == nil {
 				return id, nil
 			}
-			// 如果获取失败，记录错误并回退到普通插入
-			LogSQLError(mgr.name, querySQL, values, err)
 		}
 
 		querySQL += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
 		querySQL = mgr.convertPlaceholder(querySQL, driver)
-		LogSQL(mgr.name, querySQL, values)
+		values = mgr.sanitizeArgs(querySQL, values)
+		start := time.Now()
 		res, err := executor.Exec(querySQL, values...)
+		mgr.logTrace(start, querySQL, values, err)
 		if err != nil {
-			LogSQLError(mgr.name, querySQL, values, err)
 			return 0, err
 		}
 
@@ -981,10 +996,11 @@ func (mgr *dbManager) insert(executor sqlExecutor, table string, record *Record)
 		if id, ok := mgr.getRecordID(record, pks); ok {
 			querySQL += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
 			querySQL = mgr.convertPlaceholder(querySQL, driver)
-			LogSQL(mgr.name, querySQL, values)
+			values = mgr.sanitizeArgs(querySQL, values)
+			start := time.Now()
 			_, err := executor.Exec(querySQL, values...)
+			mgr.logTrace(start, querySQL, values, err)
 			if err != nil {
-				LogSQLError(mgr.name, querySQL, values, err)
 				return 0, err
 			}
 			return id, nil
@@ -994,24 +1010,26 @@ func (mgr *dbManager) insert(executor sqlExecutor, table string, record *Record)
 		if len(pks) == 1 {
 			returningSql := querySQL + fmt.Sprintf(" VALUES (%s) RETURNING %s INTO ?", joinStrings(placeholders), pks[0])
 			returningSql = mgr.convertPlaceholder(returningSql, driver)
-			LogSQL(mgr.name, returningSql, values)
+			values = mgr.sanitizeArgs(returningSql, values)
+			start := time.Now()
 
 			var lastID int64
 			argsWithOut := append(values, sql.Out{Dest: &lastID})
 			_, err := executor.Exec(returningSql, argsWithOut...)
+			mgr.logTrace(start, returningSql, values, err)
 			if err == nil {
 				return lastID, nil
 			}
-			LogSQLError(mgr.name, returningSql, values, err)
 		}
 
 		// 3. 最后退回到普通插入
 		querySQL += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
 		querySQL = mgr.convertPlaceholder(querySQL, driver)
-		LogSQL(mgr.name, querySQL, values)
+		values = mgr.sanitizeArgs(querySQL, values)
+		start := time.Now()
 		res, err := executor.Exec(querySQL, values...)
+		mgr.logTrace(start, querySQL, values, err)
 		if err != nil {
-			LogSQLError(mgr.name, querySQL, values, err)
 			return 0, err
 		}
 		return res.RowsAffected()
@@ -1019,10 +1037,11 @@ func (mgr *dbManager) insert(executor sqlExecutor, table string, record *Record)
 
 	querySQL += fmt.Sprintf(" VALUES (%s)", joinStrings(placeholders))
 	querySQL = mgr.convertPlaceholder(querySQL, driver)
-	LogSQL(mgr.name, querySQL, values)
+	values = mgr.sanitizeArgs(querySQL, values)
+	start := time.Now()
 	result, err := executor.Exec(querySQL, values...)
+	mgr.logTrace(start, querySQL, values, err)
 	if err != nil {
-		LogSQLError(mgr.name, querySQL, values, err)
 		return 0, err
 	}
 	return result.LastInsertId()
@@ -1052,10 +1071,11 @@ func (mgr *dbManager) update(executor sqlExecutor, table string, record *Record,
 	}
 
 	querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
-	LogSQL(mgr.name, querySQL, values)
+	values = mgr.sanitizeArgs(querySQL, values)
+	start := time.Now()
 	result, err := executor.Exec(querySQL, values...)
+	mgr.logTrace(start, querySQL, values, err)
 	if err != nil {
-		LogSQLError(mgr.name, querySQL, values, err)
 		return 0, err
 	}
 	return result.RowsAffected()
@@ -1070,12 +1090,12 @@ func (mgr *dbManager) delete(executor sqlExecutor, table string, where string, w
 	}
 
 	querySQL := fmt.Sprintf("DELETE FROM %s WHERE %s", table, where)
-	querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
-	LogSQL(mgr.name, querySQL, whereArgs)
+	querySQL, whereArgs = mgr.prepareQuerySQL(querySQL, whereArgs...)
 
+	start := time.Now()
 	result, err := executor.Exec(querySQL, whereArgs...)
+	mgr.logTrace(start, querySQL, whereArgs, err)
 	if err != nil {
-		LogSQLError(mgr.name, querySQL, whereArgs, err)
 		return 0, err
 	}
 	return result.RowsAffected()
@@ -1115,6 +1135,58 @@ func (mgr *dbManager) deleteRecord(executor sqlExecutor, table string, record *R
 	return mgr.delete(executor, table, where, whereArgs...)
 }
 
+// updateRecord 根据 Record 中的主键字段更新记录
+func (mgr *dbManager) updateRecord(executor sqlExecutor, table string, record *Record) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
+	if record == nil || len(record.columns) == 0 {
+		return 0, fmt.Errorf("record is empty")
+	}
+
+	// 获取表的主键
+	pks, err := mgr.getPrimaryKeys(executor, table)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get primary keys: %v", err)
+	}
+	if len(pks) == 0 {
+		return 0, fmt.Errorf("table %s has no primary key, cannot use updateRecord", table)
+	}
+
+	// 提取主键值构建 WHERE 条件，并从更新字段中排除主键
+	var pkClauses []string
+	var pkValues []interface{}
+
+	updateRecord := NewRecord()
+	columns, _ := mgr.getOrderedColumns(record)
+
+	for _, col := range columns {
+		isPK := false
+		for _, pk := range pks {
+			if strings.EqualFold(col, pk) {
+				isPK = true
+				pkClauses = append(pkClauses, fmt.Sprintf("%s = ?", col))
+				pkValues = append(pkValues, record.Get(col))
+				break
+			}
+		}
+		if !isPK {
+			updateRecord.Set(col, record.Get(col))
+		}
+	}
+
+	if len(pkClauses) != len(pks) {
+		return 0, fmt.Errorf("not all primary keys found in record")
+	}
+
+	if len(updateRecord.columns) == 0 {
+		return 0, nil // 只有主键，无需更新
+	}
+
+	where := strings.Join(pkClauses, " AND ")
+	return mgr.update(executor, table, updateRecord, where, pkValues...)
+}
+
 func (mgr *dbManager) count(executor sqlExecutor, table string, where string, whereArgs ...interface{}) (int64, error) {
 	if err := validateIdentifier(table); err != nil {
 		return 0, err
@@ -1127,12 +1199,12 @@ func (mgr *dbManager) count(executor sqlExecutor, table string, where string, wh
 	}
 	querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
 	whereArgs = mgr.sanitizeArgs(querySQL, whereArgs)
-	LogSQL(mgr.name, querySQL, whereArgs)
 
 	var count int64
+	start := time.Now()
 	err := executor.QueryRow(querySQL, whereArgs...).Scan(&count)
+	mgr.logTrace(start, querySQL, whereArgs, err)
 	if err != nil {
-		LogSQLError(mgr.name, querySQL, whereArgs, err)
 		return 0, err
 	}
 	return count, nil
@@ -1212,8 +1284,10 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 				if err != nil {
 					// 预处理失败，回退到单条执行
 					for _, values := range allValues {
-						LogSQL(mgr.name, querySQL, values)
+						values = mgr.sanitizeArgs(querySQL, values)
+						start := time.Now()
 						result, err := executor.Exec(querySQL, values...)
+						mgr.logTrace(start, querySQL, values, err)
 						if err != nil {
 							return totalAffected, err
 						}
@@ -1226,8 +1300,10 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 
 				// 使用预处理语句批量执行
 				for _, values := range allValues {
-					LogSQL(mgr.name, querySQL, values)
+					values = mgr.sanitizeArgs(querySQL, values)
+					start := time.Now()
 					result, err := stmt.Exec(values...)
+					mgr.logTrace(start, querySQL, values, err)
 					if err != nil {
 						return totalAffected, err
 					}
@@ -1237,8 +1313,10 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 			} else {
 				// 不支持 Prepare，回退到单条执行
 				for _, values := range allValues {
-					LogSQL(mgr.name, querySQL, values)
+					values = mgr.sanitizeArgs(querySQL, values)
+					start := time.Now()
 					result, err := executor.Exec(querySQL, values...)
+					mgr.logTrace(start, querySQL, values, err)
 					if err != nil {
 						return totalAffected, err
 					}
@@ -1262,8 +1340,9 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 			querySQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", table, joinStrings(columns), joinStrings(valueLists))
 		}
 
-		LogSQL(mgr.name, querySQL, flatArgs)
+		start := time.Now()
 		result, err := executor.Exec(querySQL, flatArgs...)
+		mgr.logTrace(start, querySQL, flatArgs, err)
 		if err != nil {
 			return totalAffected, err
 		}
@@ -1304,12 +1383,12 @@ func (mgr *dbManager) paginate(executor sqlExecutor, querySQL string, page, page
 
 	countSQL = mgr.convertPlaceholder(countSQL, driver)
 	args = mgr.sanitizeArgs(countSQL, args)
-	LogSQL(mgr.name, countSQL, args)
 
 	var total int64
+	startCount := time.Now()
 	err := executor.QueryRow(countSQL, args...).Scan(&total)
+	mgr.logTrace(startCount, countSQL, args, err)
 	if err != nil {
-		LogSQLError(mgr.name, countSQL, args, err)
 		return nil, 0, err
 	}
 
@@ -1325,25 +1404,24 @@ func (mgr *dbManager) paginate(executor sqlExecutor, querySQL string, page, page
 		if strings.Contains(lowerSQL, " order by ") {
 			paginatedSQL = fmt.Sprintf("SELECT a.* FROM (SELECT a.*, ROWNUM rn FROM (%s) a WHERE ROWNUM <= %d) a WHERE rn > %d", querySQL, offset+pageSize, offset)
 		} else {
-			paginatedSQL = fmt.Sprintf("SELECT a.* FROM (SELECT a.*, ROWNUM rn FROM (%s ORDER BY (SELECT NULL)) a WHERE ROWNUM <= %d) a WHERE rn > %d", querySQL, offset+pageSize, offset)
+			paginatedSQL = fmt.Sprintf("SELECT a.* FROM (SELECT a.*, ROWNUM rn FROM (%s ORDER BY 1) a WHERE ROWNUM <= %d) a WHERE rn > %d", querySQL, offset+pageSize, offset)
 		}
 	} else {
 		paginatedSQL = fmt.Sprintf("%s LIMIT %d OFFSET %d", querySQL, pageSize, offset)
 	}
 
 	paginatedSQL = mgr.convertPlaceholder(paginatedSQL, driver)
-	LogSQL(mgr.name, paginatedSQL, args)
 
+	startPaginate := time.Now()
 	rows, err := executor.Query(paginatedSQL, args...)
+	mgr.logTrace(startPaginate, paginatedSQL, args, err)
 	if err != nil {
-		LogSQLError(mgr.name, paginatedSQL, args, err)
 		return nil, total, err
 	}
 	defer rows.Close()
 
 	results, err := scanRecords(rows, driver)
 	if err != nil {
-		LogSQLError(mgr.name, paginatedSQL, args, err)
 		return nil, total, err
 	}
 	return results, total, nil
@@ -1550,6 +1628,14 @@ func GetCurrentDB() *dbManager {
 		panic(err.Error())
 	}
 	return dbMgr
+}
+
+// GetConfig returns the database configuration
+func (mgr *dbManager) GetConfig() (*Config, error) {
+	if mgr == nil {
+		return nil, fmt.Errorf("database manager is nil")
+	}
+	return mgr.config, nil
 }
 
 // GetDatabase returns the database manager by name
@@ -1828,7 +1914,7 @@ func (mgr *dbManager) sanitizeArgs(querySQL string, args []interface{}) []interf
 	}
 
 	if placeholderCount == 0 {
-		return nil
+		return args
 	}
 
 	if len(args) > placeholderCount {
@@ -1837,6 +1923,17 @@ func (mgr *dbManager) sanitizeArgs(querySQL string, args []interface{}) []interf
 	}
 
 	return args
+}
+
+// logTrace 辅助函数，封装 SQL 日志记录逻辑
+func (mgr *dbManager) logTrace(start time.Time, sql string, args []interface{}, err error) {
+	duration := time.Since(start)
+	cleanArgs := mgr.sanitizeArgs(sql, args)
+	if err != nil {
+		LogSQLError(mgr.name, sql, cleanArgs, duration, err)
+	} else {
+		LogSQL(mgr.name, sql, cleanArgs, duration)
+	}
 }
 
 // joinStrings joins strings with commas
