@@ -170,6 +170,18 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 	sb.WriteString("\treturn dbkit.DeleteDbModel(m)\n")
 	sb.WriteString("}\n\n")
 
+	// Add ForceDelete method for soft delete support
+	sb.WriteString(fmt.Sprintf("// ForceDelete performs a physical delete, bypassing soft delete\n"))
+	sb.WriteString(fmt.Sprintf("func (m *%s) ForceDelete() (int64, error) {\n", finalStructName))
+	sb.WriteString("\treturn dbkit.ForceDeleteModel(m)\n")
+	sb.WriteString("}\n\n")
+
+	// Add Restore method for soft delete support
+	sb.WriteString(fmt.Sprintf("// Restore restores a soft-deleted record\n"))
+	sb.WriteString(fmt.Sprintf("func (m *%s) Restore() (int64, error) {\n", finalStructName))
+	sb.WriteString("\treturn dbkit.RestoreModel(m)\n")
+	sb.WriteString("}\n\n")
+
 	// 使用泛型函数简化 FindFirst
 	sb.WriteString(fmt.Sprintf("// FindFirst finds the first %s record based on conditions\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) FindFirst(whereSql string, args ...interface{}) (*%s, error) {\n", finalStructName, finalStructName))
@@ -181,6 +193,18 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 	sb.WriteString(fmt.Sprintf("// Find finds %s records based on conditions\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Find(whereSql string, orderBySql string, args ...interface{}) ([]*%s, error) {\n", finalStructName, finalStructName))
 	sb.WriteString(fmt.Sprintf("\treturn dbkit.FindModel[*%s](m, m.GetCache(), whereSql, orderBySql, args...)\n", finalStructName))
+	sb.WriteString("}\n\n")
+
+	// Add FindWithTrashed for soft delete support
+	sb.WriteString(fmt.Sprintf("// FindWithTrashed finds %s records including soft-deleted ones\n", finalStructName))
+	sb.WriteString(fmt.Sprintf("func (m *%s) FindWithTrashed(whereSql string, orderBySql string, args ...interface{}) ([]*%s, error) {\n", finalStructName, finalStructName))
+	sb.WriteString(fmt.Sprintf("\treturn dbkit.FindModelWithTrashed[*%s](m, m.GetCache(), whereSql, orderBySql, args...)\n", finalStructName))
+	sb.WriteString("}\n\n")
+
+	// Add FindOnlyTrashed for soft delete support
+	sb.WriteString(fmt.Sprintf("// FindOnlyTrashed finds only soft-deleted %s records\n", finalStructName))
+	sb.WriteString(fmt.Sprintf("func (m *%s) FindOnlyTrashed(whereSql string, orderBySql string, args ...interface{}) ([]*%s, error) {\n", finalStructName, finalStructName))
+	sb.WriteString(fmt.Sprintf("\treturn dbkit.FindModelOnlyTrashed[*%s](m, m.GetCache(), whereSql, orderBySql, args...)\n", finalStructName))
 	sb.WriteString("}\n\n")
 
 	// 使用泛型函数简化 Paginate

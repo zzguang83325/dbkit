@@ -19,6 +19,10 @@ DBKit 是一个基于 Go 语言的高性能、轻量级数据库操作库，灵�
 - **日志记录**：内置 SQL 日志功能，轻松集成多种日志系统 
 - **缓存支持**: 内置二级缓存支持，支持本机内存缓存及 Redis 缓存，提供链式查询缓存
 - **连接池管理**: 内置连接池管理，提高性能
+- **连接池监控**: 提供连接池状态统计，支持 Prometheus 指标导出
+- **查询超时控制**: 支持全局和单次查询超时设置，防止慢查询阻塞
+- **软删除支持**: 支持配置软删除字段，自动过滤已删除记录，提供恢复和物理删除功能
+- **乐观锁支持**: 支持配置版本字段，自动检测并发冲突，防止数据覆盖
 
 
 
@@ -358,6 +362,71 @@ page, err := dbkit.Table("users").
     Paginate(1, 10)
 ```
 
+##### 高级 WHERE 条件
+
+```go
+// OrWhere - OR 条件
+orders, err := dbkit.Table("orders").
+    Where("status = ?", "active").
+    OrWhere("priority = ?", "high").
+    Find()
+// 生成: WHERE (status = ?) OR priority = ?
+
+// WhereInValues - 值列表 IN 查询
+users, err := dbkit.Table("users").
+    WhereInValues("id", []interface{}{1, 2, 3, 4, 5}).
+    Find()
+// 生成: WHERE id IN (?, ?, ?, ?, ?)
+
+// WhereNotInValues - 值列表 NOT IN 查询
+orders, err := dbkit.Table("orders").
+    WhereNotInValues("status", []interface{}{"cancelled", "refunded"}).
+    Find()
+
+// WhereBetween - 范围查询
+users, err := dbkit.Table("users").
+    WhereBetween("age", 18, 65).
+    Find()
+// 生成: WHERE age BETWEEN ? AND ?
+
+// WhereNull / WhereNotNull - NULL 值检查
+users, err := dbkit.Table("users").
+    WhereNull("deleted_at").
+    WhereNotNull("email").
+    Find()
+// 生成: WHERE deleted_at IS NULL AND email IS NOT NULL
+```
+
+##### 分组和聚合
+
+```go
+// GroupBy + Having
+stats, err := dbkit.Table("orders").
+    Select("user_id, COUNT(*) as order_count, SUM(total) as total_amount").
+    GroupBy("user_id").
+    Having("COUNT(*) > ?", 5).
+    Find()
+// 生成: SELECT ... GROUP BY user_id HAVING COUNT(*) > ?
+```
+
+##### 复杂查询示例
+
+```go
+// 组合多种条件的复杂查询
+results, err := dbkit.Table("orders").
+    Select("status, COUNT(*) as cnt, SUM(total) as total_amount").
+    Where("created_at > ?", "2024-01-01").
+    Where("active = ?", 1).
+    OrWhere("priority = ?", "high").
+    WhereInValues("type", []interface{}{"A", "B", "C"}).
+    WhereNotNull("customer_id").
+    GroupBy("status").
+    Having("COUNT(*) > ?", 10).
+    OrderBy("total_amount DESC").
+    Limit(20).
+    Find()
+```
+
 ##### 多数据库链式调用
 
 ```go
@@ -386,17 +455,28 @@ err := dbkit.Transaction(func(tx *dbkit.Tx) error {
 
 ##### 支持的方法
 
-- `Table(name string)`: 指定查询的表名。
-- `Select(columns string)`: 指定查询字段，默认为 `*`。
-- `Where(condition string, args ...interface{})`: 添加 WHERE 条件，多次调用自动使用 `AND` 连接。
-- `And(condition string, args ...interface{})`: `Where` 的别名。
-- `OrderBy(orderBy string)`: 指定排序规则。
-- `Limit(limit int)`: 指定返回记录数。
-- `Offset(offset int)`: 指定偏移量。
-- `Find() / Query()`: 执行查询并返回结果列表。
-- `FindFirst() / QueryFirst()`: 执行查询并返回第一条记录。
-- `Delete()`: 根据 `Where` 条件执行删除（出于安全考虑，必须带 `Where` 条件）。
-- `Paginate(pageNumber, pageSize int)`: 执行分页查询，返回 `*Page[Record]` 对象。
+| 方法 | 说明 |
+|------|------|
+| `Table(name)` | 指定查询的表名 |
+| `Select(columns)` | 指定查询字段，默认为 `*` |
+| `Where(condition, args...)` | 添加 WHERE 条件，多次调用使用 `AND` 连接 |
+| `And(condition, args...)` | `Where` 的别名 |
+| `OrWhere(condition, args...)` | 添加 OR 条件 |
+| `WhereInValues(column, values)` | 值列表 IN 查询 |
+| `WhereNotInValues(column, values)` | 值列表 NOT IN 查询 |
+| `WhereBetween(column, min, max)` | 范围查询 BETWEEN |
+| `WhereNotBetween(column, min, max)` | 排除范围 NOT BETWEEN |
+| `WhereNull(column)` | IS NULL 检查 |
+| `WhereNotNull(column)` | IS NOT NULL 检查 |
+| `GroupBy(columns)` | GROUP BY 分组 |
+| `Having(condition, args...)` | HAVING 过滤分组结果 |
+| `OrderBy(orderBy)` | 指定排序规则 |
+| `Limit(limit)` | 指定返回记录数 |
+| `Offset(offset)` | 指定偏移量 |
+| `Find() / Query()` | 执行查询并返回结果列表 |
+| `FindFirst() / QueryFirst()` | 执行查询并返回第一条记录 |
+| `Delete()` | 根据条件执行删除（必须带 `Where` 条件） |
+| `Paginate(page, pageSize)` | 执行分页查询 |
 
 ### 3. 插入与更新
 
@@ -447,6 +527,45 @@ dbkit.BatchInsertDefault("users", records)
 
 // 自定义每批数量
 dbkit.BatchInsert("users", records, 500)
+```
+
+#### 批量更新
+
+```go
+// 根据主键批量更新（Record 中必须包含主键字段）
+var records []*dbkit.Record
+for i := 1; i <= 100; i++ {
+    record := dbkit.NewRecord().
+        Set("id", i).           // 主键
+        Set("name", "updated"). // 要更新的字段
+        Set("age", 30)
+    records = append(records, record)
+}
+
+// 默认每批 100 条
+dbkit.BatchUpdateDefault("users", records)
+
+// 自定义每批数量
+dbkit.BatchUpdate("users", records, 50)
+```
+
+#### 批量删除
+
+```go
+// 方式1：根据 Record 批量删除（Record 中必须包含主键字段）
+var records []*dbkit.Record
+for i := 1; i <= 100; i++ {
+    record := dbkit.NewRecord().Set("id", i)
+    records = append(records, record)
+}
+dbkit.BatchDeleteDefault("users", records)
+
+// 方式2：根据主键ID列表批量删除（仅支持单主键表）
+ids := []interface{}{1, 2, 3, 4, 5}
+dbkit.BatchDeleteByIdsDefault("users", ids)
+
+// 自定义每批数量
+dbkit.BatchDeleteByIds("users", ids, 50)
 ```
 
 ### 4. Record 对象详解
@@ -807,9 +926,264 @@ config := &dbkit.Config{
     MaxOpen:         50,    // 最大打开连接数
     MaxIdle:         25,    // 最大空闲连接数
     ConnMaxLifetime: time.Hour, // 连接最大生命周期
+    QueryTimeout:    30 * time.Second, // 默认查询超时时间
 }
 
 dbkit.OpenDatabaseWithConfig(config)
+```
+
+### 8. 查询超时控制
+
+DBKit 支持全局和单次查询超时设置，使用 Go 标准库的 `context.Context` 实现，超时后自动取消查询。
+
+#### 全局默认超时
+```go
+config := &dbkit.Config{
+    Driver:       dbkit.MySQL,
+    DSN:          "...",
+    MaxOpen:      10,
+    QueryTimeout: 30 * time.Second,  // 所有查询默认30秒超时
+}
+dbkit.OpenDatabaseWithConfig(config)
+```
+
+#### 单次查询超时
+```go
+// 方式1：全局函数
+users, err := dbkit.Timeout(5 * time.Second).Query("SELECT * FROM users")
+
+// 方式2：指定数据库
+users, err := dbkit.Use("default").Timeout(5 * time.Second).Query("SELECT * FROM users")
+
+// 方式3：链式查询
+users, err := dbkit.Table("users").
+    Where("age > ?", 18).
+    Timeout(10 * time.Second).
+    Find()
+```
+
+#### 事务中设置超时
+```go
+dbkit.Transaction(func(tx *dbkit.Tx) error {
+    // 事务内的查询也支持超时
+    _, err := tx.Timeout(5 * time.Second).Query("SELECT * FROM orders")
+    return err
+})
+```
+
+#### 超时错误处理
+```go
+import "context"
+
+users, err := dbkit.Timeout(1 * time.Second).Query("SELECT SLEEP(5)")
+if err != nil {
+    if errors.Is(err, context.DeadlineExceeded) {
+        fmt.Println("查询超时")
+    }
+}
+```
+
+### 9. 连接池监控
+
+DBKit 提供连接池状态监控功能，可以实时查看连接池的使用情况。
+
+#### 获取连接池统计
+```go
+// 获取默认数据库的连接池统计
+stats := dbkit.GetPoolStats()
+fmt.Println(stats.String())
+// 输出: PoolStats[default/mysql]: Open=5 (InUse=2, Idle=3), MaxOpen=10, WaitCount=0, WaitDuration=0s
+
+// 获取指定数据库的连接池统计
+stats := dbkit.GetPoolStatsDB("postgresql")
+
+// 获取所有数据库的连接池统计
+allStats := dbkit.AllPoolStats()
+for name, stats := range allStats {
+    fmt.Printf("%s: %s\n", name, stats.String())
+}
+```
+
+#### PoolStats 结构体
+```go
+type PoolStats struct {
+    DBName             string        // 数据库名称
+    Driver             string        // 驱动类型
+    MaxOpenConnections int           // 最大连接数（配置值）
+    OpenConnections    int           // 当前打开的连接数
+    InUse              int           // 正在使用的连接数
+    Idle               int           // 空闲连接数
+    WaitCount          int64         // 等待连接的总次数
+    WaitDuration       time.Duration // 等待连接的总时长
+    MaxIdleClosed      int64         // 因超过最大空闲数而关闭的连接数
+    MaxLifetimeClosed  int64         // 因超过最大生命周期而关闭的连接数
+}
+```
+
+#### 转换为 Map（便于 JSON 序列化）
+```go
+stats := dbkit.GetPoolStats()
+statsMap := stats.ToMap()
+jsonBytes, _ := json.Marshal(statsMap)
+fmt.Println(string(jsonBytes))
+```
+
+#### 导出 Prometheus 指标
+```go
+// 单个数据库
+stats := dbkit.GetPoolStats()
+fmt.Println(stats.PrometheusMetrics())
+
+// 所有数据库
+fmt.Println(dbkit.AllPrometheusMetrics())
+```
+
+输出示例：
+```
+# HELP dbkit_pool_max_open_connections Maximum number of open connections to the database.
+# TYPE dbkit_pool_max_open_connections gauge
+dbkit_pool_max_open_connections{db="default",driver="mysql"} 10
+
+# HELP dbkit_pool_open_connections The number of established connections both in use and idle.
+# TYPE dbkit_pool_open_connections gauge
+dbkit_pool_open_connections{db="default",driver="mysql"} 5
+
+# HELP dbkit_pool_in_use The number of connections currently in use.
+# TYPE dbkit_pool_in_use gauge
+dbkit_pool_in_use{db="default",driver="mysql"} 2
+
+# HELP dbkit_pool_idle The number of idle connections.
+# TYPE dbkit_pool_idle gauge
+dbkit_pool_idle{db="default",driver="mysql"} 3
+```
+
+### 10. 软删除 (Soft Delete)
+
+软删除允许删除记录时只标记为已删除而非物理删除，便于数据恢复和审计。
+
+#### 配置软删除
+```go
+// 为表配置软删除（时间戳类型，字段为 deleted_at）
+dbkit.ConfigSoftDelete("users", "deleted_at")
+
+// 使用布尔类型
+dbkit.ConfigSoftDeleteWithType("posts", "is_deleted", dbkit.SoftDeleteBool)
+
+// 多数据库模式
+dbkit.Use("main").ConfigSoftDelete("users", "deleted_at")
+```
+
+#### 软删除操作
+```go
+// 软删除（自动更新 deleted_at 字段）
+dbkit.Delete("users", "id = ?", 1)
+
+// 普通查询（自动过滤已删除记录）
+users, _ := dbkit.Table("users").Find()
+
+// 查询包含已删除记录
+allUsers, _ := dbkit.Table("users").WithTrashed().Find()
+
+// 只查询已删除记录
+deletedUsers, _ := dbkit.Table("users").OnlyTrashed().Find()
+
+// 恢复已删除记录
+dbkit.Restore("users", "id = ?", 1)
+
+// 物理删除（真正删除数据）
+dbkit.ForceDelete("users", "id = ?", 1)
+```
+
+#### 链式调用
+```go
+// 软删除
+dbkit.Table("users").Where("id = ?", 1).Delete()
+
+// 恢复
+dbkit.Table("users").Where("id = ?", 1).Restore()
+
+// 物理删除
+dbkit.Table("users").Where("id = ?", 1).ForceDelete()
+
+// 统计（自动过滤已删除）
+count, _ := dbkit.Table("users").Count()
+
+// 统计（包含已删除）
+count, _ := dbkit.Table("users").WithTrashed().Count()
+```
+
+#### DbModel 软删除
+```go
+// 生成的 DbModel 自动包含软删除方法
+user.Delete()       // 软删除
+user.ForceDelete()  // 物理删除
+user.Restore()      // 恢复
+
+// 查询方法
+users, _ := user.FindWithTrashed("status = ?", "id DESC", "active")
+deletedUsers, _ := user.FindOnlyTrashed("", "id DESC")
+```
+
+### 11. 乐观锁 (Optimistic Lock)
+
+乐观锁通过版本号字段检测并发更新冲突，防止数据被意外覆盖。
+
+#### 配置乐观锁
+```go
+// 为表配置乐观锁（默认字段名 version）
+dbkit.ConfigOptimisticLock("products")
+
+// 使用自定义字段名
+dbkit.ConfigOptimisticLockWithField("orders", "revision")
+
+// 多数据库模式
+dbkit.Use("main").ConfigOptimisticLock("products")
+```
+
+#### 乐观锁操作
+```go
+// 插入数据（version 自动初始化为 1）
+record := dbkit.NewRecord().Set("name", "Laptop").Set("price", 999.99)
+dbkit.Insert("products", record)
+
+// 更新数据（带版本号）
+updateRecord := dbkit.NewRecord()
+updateRecord.Set("version", int64(1))  // 当前版本
+updateRecord.Set("price", 899.99)
+rows, err := dbkit.Update("products", updateRecord, "id = ?", 1)
+// 成功：version 自动递增为 2
+
+// 并发冲突检测（使用过期版本）
+staleRecord := dbkit.NewRecord()
+staleRecord.Set("version", int64(1))  // 过期版本！
+staleRecord.Set("price", 799.99)
+rows, err = dbkit.Update("products", staleRecord, "id = ?", 1)
+if errors.Is(err, dbkit.ErrVersionMismatch) {
+    fmt.Println("检测到并发冲突，记录已被其他事务修改")
+}
+
+// 正确处理并发：先读取最新版本
+latestRecord, _ := dbkit.Table("products").Where("id = ?", 1).FindFirst()
+currentVersion := latestRecord.GetInt("version")
+
+updateRecord2 := dbkit.NewRecord()
+updateRecord2.Set("version", currentVersion)
+updateRecord2.Set("price", 799.99)
+dbkit.Update("products", updateRecord2, "id = ?", 1)
+```
+
+#### 事务中使用乐观锁
+```go
+dbkit.Transaction(func(tx *dbkit.Tx) error {
+    rec, _ := tx.Table("products").Where("id = ?", 1).FindFirst()
+    currentVersion := rec.GetInt("version")
+    
+    updateRec := dbkit.NewRecord()
+    updateRec.Set("version", currentVersion)
+    updateRec.Set("stock", 80)
+    _, err := tx.Update("products", updateRec, "id = ?", 1)
+    return err  // 版本冲突时自动回滚
+})
 ```
 
 ### 缓存支持 (Caching)

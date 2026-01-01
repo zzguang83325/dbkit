@@ -8,6 +8,9 @@
 - [Query Operations](#query-operations)
 - [Insert & Update](#insert--update)
 - [Delete Operations](#delete-operations)
+- [Soft Delete](#soft-delete)
+- [Auto Timestamps](#auto-timestamps)
+- [Optimistic Lock](#optimistic-lock)
 - [Transaction Handling](#transaction-handling)
 - [Record Object](#record-object)
 - [Chain Query](#chain-query)
@@ -266,7 +269,7 @@ func Delete(table string, whereSql string, whereArgs ...interface{}) (int64, err
 func (db *DB) Delete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
 func (tx *Tx) Delete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
 ```
-Deletes records matching the condition.
+Deletes records matching the condition. If soft delete is configured for the table, performs a soft delete (updates the delete marker field).
 
 ### DeleteRecord
 ```go
@@ -275,6 +278,486 @@ func (db *DB) DeleteRecord(table string, record *Record) (int64, error)
 func (tx *Tx) DeleteRecord(table string, record *Record) (int64, error)
 ```
 Deletes a record based on its primary key.
+
+---
+
+## Soft Delete
+
+Soft delete allows marking records as deleted instead of physically removing them, enabling data recovery and auditing.
+
+### Soft Delete Types
+```go
+const (
+    SoftDeleteTimestamp SoftDeleteType = iota  // Timestamp type (deleted_at)
+    SoftDeleteBool                              // Boolean type (is_deleted)
+)
+```
+
+### ConfigSoftDelete
+```go
+func ConfigSoftDelete(table, field string)
+func (db *DB) ConfigSoftDelete(table, field string) *DB
+```
+Configures soft delete for a table (timestamp type).
+
+**Parameters:**
+- `table`: Table name
+- `field`: Soft delete field name (e.g., "deleted_at")
+
+**Example:**
+```go
+// Configure soft delete
+dbkit.ConfigSoftDelete("users", "deleted_at")
+
+// Multi-database mode
+dbkit.Use("main").ConfigSoftDelete("users", "deleted_at")
+```
+
+### ConfigSoftDeleteWithType
+```go
+func ConfigSoftDeleteWithType(table, field string, deleteType SoftDeleteType)
+func (db *DB) ConfigSoftDeleteWithType(table, field string, deleteType SoftDeleteType) *DB
+```
+Configures soft delete for a table with specified type.
+
+**Example:**
+```go
+// Use boolean type
+dbkit.ConfigSoftDeleteWithType("posts", "is_deleted", dbkit.SoftDeleteBool)
+```
+
+### RemoveSoftDelete
+```go
+func RemoveSoftDelete(table string)
+func (db *DB) RemoveSoftDelete(table string) *DB
+```
+Removes soft delete configuration for a table.
+
+### HasSoftDelete
+```go
+func HasSoftDelete(table string) bool
+func (db *DB) HasSoftDelete(table string) bool
+```
+Checks if soft delete is configured for a table.
+
+### WithTrashed
+```go
+func (qb *QueryBuilder) WithTrashed() *QueryBuilder
+```
+Includes soft-deleted records in query results.
+
+**Example:**
+```go
+// Query all users (including deleted)
+users, err := dbkit.Table("users").WithTrashed().Find()
+```
+
+### OnlyTrashed
+```go
+func (qb *QueryBuilder) OnlyTrashed() *QueryBuilder
+```
+Returns only soft-deleted records.
+
+**Example:**
+```go
+// Query only deleted users
+deletedUsers, err := dbkit.Table("users").OnlyTrashed().Find()
+```
+
+### ForceDelete
+```go
+func ForceDelete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (db *DB) ForceDelete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (tx *Tx) ForceDelete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (qb *QueryBuilder) ForceDelete() (int64, error)
+```
+Physically deletes records, bypassing soft delete configuration.
+
+**Example:**
+```go
+// Physical delete
+dbkit.ForceDelete("users", "id = ?", 1)
+
+// Chain call
+dbkit.Table("users").Where("id = ?", 1).ForceDelete()
+```
+
+### Restore
+```go
+func Restore(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (db *DB) Restore(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (tx *Tx) Restore(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (qb *QueryBuilder) Restore() (int64, error)
+```
+Restores soft-deleted records.
+
+**Example:**
+```go
+// Restore record
+dbkit.Restore("users", "id = ?", 1)
+
+// Chain call
+dbkit.Table("users").Where("id = ?", 1).Restore()
+```
+
+### Complete Soft Delete Example
+```go
+// 1. Configure soft delete
+dbkit.ConfigSoftDelete("users", "deleted_at")
+
+// 2. Insert data
+record := dbkit.NewRecord()
+record.Set("name", "John")
+dbkit.Insert("users", record)
+
+// 3. Soft delete (automatically updates deleted_at field)
+dbkit.Delete("users", "id = ?", 1)
+
+// 4. Normal query (automatically filters deleted records)
+users, _ := dbkit.Table("users").Find()  // Excludes deleted
+
+// 5. Query including deleted records
+allUsers, _ := dbkit.Table("users").WithTrashed().Find()
+
+// 6. Query only deleted records
+deletedUsers, _ := dbkit.Table("users").OnlyTrashed().Find()
+
+// 7. Restore deleted record
+dbkit.Restore("users", "id = ?", 1)
+
+// 8. Physical delete (permanently removes data)
+dbkit.ForceDelete("users", "id = ?", 1)
+```
+
+### DbModel Soft Delete Methods
+
+Generated DbModels automatically include soft delete methods:
+
+```go
+// Soft delete (if configured)
+user.Delete()
+
+// Physical delete
+user.ForceDelete()
+
+// Restore
+user.Restore()
+
+// Query including deleted
+users, _ := user.FindWithTrashed("status = ?", "id DESC", "active")
+
+// Query only deleted
+deletedUsers, _ := user.FindOnlyTrashed("", "id DESC")
+```
+
+---
+
+## Auto Timestamps
+
+Auto timestamps feature automatically fills timestamp fields when inserting and updating records, without manual setting.
+
+### ConfigTimestamps
+```go
+func ConfigTimestamps(table string)
+func (db *DB) ConfigTimestamps(table string) *DB
+```
+Configures auto timestamps for a table using default field names `created_at` and `updated_at`.
+
+**Example:**
+```go
+// Configure auto timestamps
+dbkit.ConfigTimestamps("users")
+
+// Multi-database mode
+dbkit.Use("main").ConfigTimestamps("users")
+```
+
+### ConfigTimestampsWithFields
+```go
+func ConfigTimestampsWithFields(table, createdAtField, updatedAtField string)
+func (db *DB) ConfigTimestampsWithFields(table, createdAtField, updatedAtField string) *DB
+```
+Configures auto timestamps for a table with custom field names.
+
+**Parameters:**
+- `table`: Table name
+- `createdAtField`: Created at field name (e.g., "create_time")
+- `updatedAtField`: Updated at field name (e.g., "update_time")
+
+**Example:**
+```go
+// Use custom field names
+dbkit.ConfigTimestampsWithFields("orders", "create_time", "update_time")
+```
+
+### ConfigCreatedAt
+```go
+func ConfigCreatedAt(table, field string)
+func (db *DB) ConfigCreatedAt(table, field string) *DB
+```
+Configures only the created_at field.
+
+**Example:**
+```go
+// Configure only created_at (suitable for log tables)
+dbkit.ConfigCreatedAt("logs", "log_time")
+```
+
+### ConfigUpdatedAt
+```go
+func ConfigUpdatedAt(table, field string)
+func (db *DB) ConfigUpdatedAt(table, field string) *DB
+```
+Configures only the updated_at field.
+
+**Example:**
+```go
+// Configure only updated_at
+dbkit.ConfigUpdatedAt("cache_data", "last_modified")
+```
+
+### RemoveTimestamps
+```go
+func RemoveTimestamps(table string)
+func (db *DB) RemoveTimestamps(table string) *DB
+```
+Removes timestamp configuration for a table.
+
+### HasTimestamps
+```go
+func HasTimestamps(table string) bool
+func (db *DB) HasTimestamps(table string) bool
+```
+Checks if auto timestamps are configured for a table.
+
+### WithoutTimestamps
+```go
+func (qb *QueryBuilder) WithoutTimestamps() *QueryBuilder
+```
+Temporarily disables auto timestamps (for QueryBuilder Update operations).
+
+**Example:**
+```go
+// Update without auto-filling updated_at
+dbkit.Table("users").Where("id = ?", 1).WithoutTimestamps().Update(record)
+```
+
+### Auto Timestamps Behavior
+
+- **Insert operation**: If `created_at` field is not set, automatically fills with current time
+- **Update operation**: Always automatically fills `updated_at` field with current time
+- **Manual setting priority**: If `created_at` is already set in Record, it won't be overwritten
+
+### Complete Auto Timestamps Example
+```go
+// 1. Configure auto timestamps
+dbkit.ConfigTimestamps("users")
+
+// 2. Insert data (created_at auto-filled)
+record := dbkit.NewRecord()
+record.Set("name", "John")
+record.Set("email", "john@example.com")
+dbkit.Insert("users", record)
+// created_at automatically set to current time
+
+// 3. Update data (updated_at auto-filled)
+updateRecord := dbkit.NewRecord()
+updateRecord.Set("name", "John Updated")
+dbkit.Update("users", updateRecord, "id = ?", 1)
+// updated_at automatically set to current time
+
+// 4. Insert with manual created_at (won't be overwritten)
+customTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+record2 := dbkit.NewRecord()
+record2.Set("name", "Jane")
+record2.Set("created_at", customTime)
+dbkit.Insert("users", record2)
+// created_at remains 2020-01-01
+
+// 5. Temporarily disable auto timestamps
+dbkit.Table("users").Where("id = ?", 1).WithoutTimestamps().Update(record)
+// updated_at won't be auto-updated
+
+// 6. Use custom field names
+dbkit.ConfigTimestampsWithFields("orders", "create_time", "update_time")
+
+// 7. Configure only created_at (suitable for log tables)
+dbkit.ConfigCreatedAt("logs", "log_time")
+```
+
+### Using with Soft Delete
+
+Auto timestamps and soft delete features are independent and can be used together:
+
+```go
+// Configure both soft delete and auto timestamps
+dbkit.ConfigTimestamps("users")
+dbkit.ConfigSoftDelete("users", "deleted_at")
+
+// When soft deleting, updated_at is also auto-updated
+dbkit.Delete("users", "id = ?", 1)
+// deleted_at set to current time, updated_at also updated
+```
+
+---
+
+## Optimistic Lock
+
+Optimistic lock is a concurrency control mechanism that detects concurrent update conflicts through a version field, preventing data from being accidentally overwritten.
+
+### How It Works
+
+1. **Insert**: Automatically initializes the version field to 1
+2. **Update**: Automatically adds version check to WHERE clause and increments version in SET clause
+3. **Conflict Detection**: If update affects 0 rows (version mismatch), returns `ErrVersionMismatch` error
+
+### ErrVersionMismatch
+```go
+var ErrVersionMismatch = fmt.Errorf("dbkit: optimistic lock conflict - record was modified by another transaction")
+```
+Error returned when version conflict is detected.
+
+### ConfigOptimisticLock
+```go
+func ConfigOptimisticLock(table string)
+func (db *DB) ConfigOptimisticLock(table string) *DB
+```
+Configures optimistic lock for a table using default field name `version`.
+
+**Example:**
+```go
+// Configure optimistic lock
+dbkit.ConfigOptimisticLock("products")
+
+// Multi-database mode
+dbkit.Use("main").ConfigOptimisticLock("products")
+```
+
+### ConfigOptimisticLockWithField
+```go
+func ConfigOptimisticLockWithField(table, versionField string)
+func (db *DB) ConfigOptimisticLockWithField(table, versionField string) *DB
+```
+Configures optimistic lock for a table with custom version field name.
+
+**Example:**
+```go
+// Use custom field name
+dbkit.ConfigOptimisticLockWithField("orders", "revision")
+```
+
+### RemoveOptimisticLock
+```go
+func RemoveOptimisticLock(table string)
+func (db *DB) RemoveOptimisticLock(table string) *DB
+```
+Removes optimistic lock configuration for a table.
+
+### HasOptimisticLock
+```go
+func HasOptimisticLock(table string) bool
+func (db *DB) HasOptimisticLock(table string) bool
+```
+Checks if optimistic lock is configured for a table.
+
+### Version Field Handling Rules
+
+| version field value | Behavior |
+|---------------------|----------|
+| Not present | Skip version check, normal update |
+| `nil` / `NULL` | Skip version check, normal update |
+| `""` (empty string) | Skip version check, normal update |
+| `0`, `1`, `2`, ... | Perform version check |
+| `"123"` (numeric string) | Perform version check (parsed as number) |
+
+### Complete Optimistic Lock Example
+
+```go
+// 1. Configure optimistic lock
+dbkit.ConfigOptimisticLock("products")
+
+// 2. Insert data (version auto-initialized to 1)
+record := dbkit.NewRecord()
+record.Set("name", "Laptop")
+record.Set("price", 999.99)
+dbkit.Insert("products", record)
+// version automatically set to 1
+
+// 3. Normal update (with version)
+updateRecord := dbkit.NewRecord()
+updateRecord.Set("version", int64(1))  // current version
+updateRecord.Set("price", 899.99)
+rows, err := dbkit.Update("products", updateRecord, "id = ?", 1)
+// Success: version auto-incremented to 2
+
+// 4. Concurrent conflict detection (using stale version)
+staleRecord := dbkit.NewRecord()
+staleRecord.Set("version", int64(1))  // stale version!
+staleRecord.Set("price", 799.99)
+rows, err = dbkit.Update("products", staleRecord, "id = ?", 1)
+if errors.Is(err, dbkit.ErrVersionMismatch) {
+    fmt.Println("Concurrent conflict detected, record was modified by another transaction")
+}
+
+// 5. Correct way to handle concurrency: read latest version first
+latestRecord, _ := dbkit.Table("products").Where("id = ?", 1).FindFirst()
+currentVersion := latestRecord.GetInt("version")
+
+updateRecord2 := dbkit.NewRecord()
+updateRecord2.Set("version", currentVersion)
+updateRecord2.Set("price", 799.99)
+dbkit.Update("products", updateRecord2, "id = ?", 1)
+
+// 6. Update without version field (skips version check)
+noVersionRecord := dbkit.NewRecord()
+noVersionRecord.Set("stock", 90)  // no version set
+dbkit.Update("products", noVersionRecord, "id = ?", 1)
+// Normal update, no version check
+
+// 7. Using UpdateRecord (auto-extracts version from record)
+product, _ := dbkit.Table("products").Where("id = ?", 1).FindFirst()
+product.Set("name", "Gaming Laptop")
+dbkit.Use("default").UpdateRecord("products", product)
+// version is already in product, auto version check
+
+// 8. Using optimistic lock in transaction
+dbkit.Transaction(func(tx *dbkit.Tx) error {
+    rec, _ := tx.Table("products").Where("id = ?", 1).FindFirst()
+    currentVersion := rec.GetInt("version")
+    
+    updateRec := dbkit.NewRecord()
+    updateRec.Set("version", currentVersion)
+    updateRec.Set("stock", 80)
+    _, err := tx.Update("products", updateRec, "id = ?", 1)
+    return err  // auto rollback on version conflict
+})
+```
+
+### Using with Other Features
+
+Optimistic lock can be used together with auto timestamps and soft delete:
+
+```go
+// Configure multiple features together
+dbkit.ConfigOptimisticLock("products")
+dbkit.ConfigTimestamps("products")
+dbkit.ConfigSoftDelete("products", "deleted_at")
+
+// Insert: version=1, created_at=now
+// Update: version++, updated_at=now
+// Delete: deleted_at=now, updated_at=now
+```
+
+### IOptimisticLockModel Interface
+
+```go
+type IOptimisticLockModel interface {
+    IDbModel
+    VersionField() string  // Returns version field name, empty string means not using
+}
+```
+
+Generated DbModels can implement this interface to auto-configure optimistic lock.
 
 ---
 
@@ -451,6 +934,284 @@ users, err := dbkit.Table("users").
     Where("status = ?", "active").
     OrderBy("created_at DESC").
     Limit(10).
+    Find()
+```
+
+### Join Query
+
+Supports multiple JOIN types with chain calls:
+
+```go
+func (b *QueryBuilder) Join(table, condition string, args ...interface{}) *QueryBuilder      // JOIN
+func (b *QueryBuilder) LeftJoin(table, condition string, args ...interface{}) *QueryBuilder  // LEFT JOIN
+func (b *QueryBuilder) RightJoin(table, condition string, args ...interface{}) *QueryBuilder // RIGHT JOIN
+func (b *QueryBuilder) InnerJoin(table, condition string, args ...interface{}) *QueryBuilder // INNER JOIN
+```
+
+**Examples:**
+```go
+// Simple JOIN
+records, err := dbkit.Table("users").
+    Select("users.name, orders.total").
+    LeftJoin("orders", "users.id = orders.user_id").
+    Where("orders.status = ?", "completed").
+    Find()
+
+// Multiple JOINs
+records, err := dbkit.Table("orders").
+    Select("orders.id, users.name, products.name as product_name").
+    InnerJoin("users", "orders.user_id = users.id").
+    InnerJoin("order_items", "orders.id = order_items.order_id").
+    InnerJoin("products", "order_items.product_id = products.id").
+    Where("orders.status = ?", "completed").
+    OrderBy("orders.created_at DESC").
+    Find()
+
+// JOIN with parameterized condition
+records, err := dbkit.Table("users").
+    Join("orders", "users.id = orders.user_id AND orders.status = ?", "active").
+    Find()
+```
+
+### Subquery
+
+#### NewSubquery
+```go
+func NewSubquery() *Subquery
+```
+Creates a new subquery builder.
+
+#### Subquery Methods
+```go
+func (s *Subquery) Table(name string) *Subquery                           // Set table name
+func (s *Subquery) Select(columns string) *Subquery                       // Set columns
+func (s *Subquery) Where(condition string, args ...interface{}) *Subquery // Add condition
+func (s *Subquery) OrderBy(orderBy string) *Subquery                      // Order by
+func (s *Subquery) Limit(limit int) *Subquery                             // Limit
+func (s *Subquery) ToSQL() (string, []interface{})                        // Generate SQL
+```
+
+#### WHERE IN Subquery
+```go
+func (b *QueryBuilder) WhereIn(column string, sub *Subquery) *QueryBuilder    // WHERE column IN (subquery)
+func (b *QueryBuilder) WhereNotIn(column string, sub *Subquery) *QueryBuilder // WHERE column NOT IN (subquery)
+```
+
+**Examples:**
+```go
+// Find users with orders
+activeUsersSub := dbkit.NewSubquery().
+    Table("orders").
+    Select("DISTINCT user_id").
+    Where("status = ?", "completed")
+
+users, err := dbkit.Table("users").
+    Select("*").
+    WhereIn("id", activeUsersSub).
+    Find()
+
+// Find orders from non-banned users
+bannedUsersSub := dbkit.NewSubquery().
+    Table("users").
+    Select("id").
+    Where("status = ?", "banned")
+
+orders, err := dbkit.Table("orders").
+    WhereNotIn("user_id", bannedUsersSub).
+    Find()
+```
+
+#### FROM Subquery
+```go
+func (b *QueryBuilder) TableSubquery(sub *Subquery, alias string) *QueryBuilder
+```
+Uses a subquery as the FROM source (derived table).
+
+**Example:**
+```go
+// Query from aggregated subquery
+userTotalsSub := dbkit.NewSubquery().
+    Table("orders").
+    Select("user_id, SUM(total) as total_spent")
+
+records, err := (&dbkit.QueryBuilder{}).
+    TableSubquery(userTotalsSub, "user_totals").
+    Select("user_id, total_spent").
+    Where("total_spent > ?", 1000).
+    Find()
+```
+
+#### SELECT Subquery
+```go
+func (b *QueryBuilder) SelectSubquery(sub *Subquery, alias string) *QueryBuilder
+```
+Adds a subquery as a field in the SELECT clause.
+
+**Example:**
+```go
+// Add order count field for each user
+orderCountSub := dbkit.NewSubquery().
+    Table("orders").
+    Select("COUNT(*)").
+    Where("orders.user_id = users.id")
+
+users, err := dbkit.Table("users").
+    Select("users.id, users.name").
+    SelectSubquery(orderCountSub, "order_count").
+    Find()
+```
+
+### Advanced WHERE Conditions
+
+#### OrWhere
+```go
+func (b *QueryBuilder) OrWhere(condition string, args ...interface{}) *QueryBuilder
+```
+Adds an OR condition to the query. When combined with Where, AND conditions are wrapped in parentheses to maintain correct precedence.
+
+**Examples:**
+```go
+// Find orders with status active OR priority high
+orders, err := dbkit.Table("orders").
+    Where("status = ?", "active").
+    OrWhere("priority = ?", "high").
+    Find()
+// Generates: WHERE (status = ?) OR priority = ?
+
+// Multiple OR conditions
+orders, err := dbkit.Table("orders").
+    OrWhere("status = ?", "pending").
+    OrWhere("status = ?", "processing").
+    OrWhere("status = ?", "shipped").
+    Find()
+// Generates: WHERE status = ? OR status = ? OR status = ?
+```
+
+#### WhereInValues / WhereNotInValues
+```go
+func (b *QueryBuilder) WhereInValues(column string, values []interface{}) *QueryBuilder
+func (b *QueryBuilder) WhereNotInValues(column string, values []interface{}) *QueryBuilder
+```
+IN/NOT IN query with a list of values (distinct from subquery versions WhereIn/WhereNotIn).
+
+**Examples:**
+```go
+// Find users with specific IDs
+users, err := dbkit.Table("users").
+    WhereInValues("id", []interface{}{1, 2, 3, 4, 5}).
+    Find()
+// Generates: WHERE id IN (?, ?, ?, ?, ?)
+
+// Exclude orders with specific statuses
+orders, err := dbkit.Table("orders").
+    WhereNotInValues("status", []interface{}{"cancelled", "refunded"}).
+    Find()
+// Generates: WHERE status NOT IN (?, ?)
+```
+
+#### WhereBetween / WhereNotBetween
+```go
+func (b *QueryBuilder) WhereBetween(column string, min, max interface{}) *QueryBuilder
+func (b *QueryBuilder) WhereNotBetween(column string, min, max interface{}) *QueryBuilder
+```
+Range queries.
+
+**Examples:**
+```go
+// Find users aged between 18-65
+users, err := dbkit.Table("users").
+    WhereBetween("age", 18, 65).
+    Find()
+// Generates: WHERE age BETWEEN ? AND ?
+
+// Find products with price not between 100-500
+products, err := dbkit.Table("products").
+    WhereNotBetween("price", 100, 500).
+    Find()
+// Generates: WHERE price NOT BETWEEN ? AND ?
+
+// Date range query
+orders, err := dbkit.Table("orders").
+    WhereBetween("created_at", "2024-01-01", "2024-12-31").
+    Find()
+```
+
+#### WhereNull / WhereNotNull
+```go
+func (b *QueryBuilder) WhereNull(column string) *QueryBuilder
+func (b *QueryBuilder) WhereNotNull(column string) *QueryBuilder
+```
+NULL value checks.
+
+**Examples:**
+```go
+// Find users without email
+users, err := dbkit.Table("users").
+    WhereNull("email").
+    Find()
+// Generates: WHERE email IS NULL
+
+// Find users with phone number
+users, err := dbkit.Table("users").
+    WhereNotNull("phone").
+    Find()
+// Generates: WHERE phone IS NOT NULL
+```
+
+### Grouping and Aggregation
+
+#### GroupBy
+```go
+func (b *QueryBuilder) GroupBy(columns string) *QueryBuilder
+```
+Adds a GROUP BY clause.
+
+#### Having
+```go
+func (b *QueryBuilder) Having(condition string, args ...interface{}) *QueryBuilder
+```
+Adds a HAVING clause to filter grouped results.
+
+**Examples:**
+```go
+// Group orders by status
+stats, err := dbkit.Table("orders").
+    Select("status, COUNT(*) as count, SUM(total) as total_amount").
+    GroupBy("status").
+    Find()
+
+// Find users with more than 5 orders
+users, err := dbkit.Table("orders").
+    Select("user_id, COUNT(*) as order_count").
+    GroupBy("user_id").
+    Having("COUNT(*) > ?", 5).
+    Find()
+
+// Multiple HAVING conditions
+stats, err := dbkit.Table("orders").
+    Select("user_id, COUNT(*) as cnt, SUM(total) as total").
+    GroupBy("user_id").
+    Having("COUNT(*) > ?", 3).
+    Having("SUM(total) > ?", 1000).
+    Find()
+// Generates: HAVING COUNT(*) > ? AND SUM(total) > ?
+```
+
+### Complex Query Example
+
+```go
+// Complex query combining multiple conditions
+results, err := dbkit.Table("orders").
+    Select("status, COUNT(*) as cnt, SUM(total) as total_amount").
+    Where("created_at > ?", "2024-01-01").
+    Where("active = ?", 1).
+    OrWhere("priority = ?", "high").
+    WhereInValues("type", []interface{}{"A", "B", "C"}).
+    WhereNotNull("customer_id").
+    GroupBy("status").
+    Having("COUNT(*) > ?", 10).
+    OrderBy("total_amount DESC").
+    Limit(20).
     Find()
 ```
 

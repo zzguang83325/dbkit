@@ -1,6 +1,7 @@
 package dbkit
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -117,6 +118,48 @@ func BatchInsertDefault(table string, records []*Record) (int64, error) {
 	return db.BatchInsertDefault(table, records)
 }
 
+// BatchUpdate updates multiple records by primary key
+func BatchUpdate(table string, records []*Record, batchSize int) (int64, error) {
+	db, err := defaultDB()
+	if err != nil {
+		return 0, err
+	}
+	return db.BatchUpdate(table, records, batchSize)
+}
+
+// BatchUpdateDefault updates multiple records with default batch size (100)
+func BatchUpdateDefault(table string, records []*Record) (int64, error) {
+	return BatchUpdate(table, records, 100)
+}
+
+// BatchDelete deletes multiple records by primary key
+func BatchDelete(table string, records []*Record, batchSize int) (int64, error) {
+	db, err := defaultDB()
+	if err != nil {
+		return 0, err
+	}
+	return db.BatchDelete(table, records, batchSize)
+}
+
+// BatchDeleteDefault deletes multiple records with default batch size (100)
+func BatchDeleteDefault(table string, records []*Record) (int64, error) {
+	return BatchDelete(table, records, 100)
+}
+
+// BatchDeleteByIds deletes records by primary key IDs
+func BatchDeleteByIds(table string, ids []interface{}, batchSize int) (int64, error) {
+	db, err := defaultDB()
+	if err != nil {
+		return 0, err
+	}
+	return db.BatchDeleteByIds(table, ids, batchSize)
+}
+
+// BatchDeleteByIdsDefault deletes records by IDs with default batch size (100)
+func BatchDeleteByIdsDefault(table string, ids []interface{}) (int64, error) {
+	return BatchDeleteByIds(table, ids, 100)
+}
+
 func Count(table string, whereSql string, whereArgs ...interface{}) (int64, error) {
 	db, err := defaultDB()
 	if err != nil {
@@ -156,6 +199,16 @@ func Ping() error {
 		return err
 	}
 	return dbMgr.Ping()
+}
+
+// Timeout returns a DB instance with the specified query timeout
+func Timeout(d time.Duration) *DB {
+	db, err := defaultDB()
+	if err != nil {
+		return &DB{lastErr: err}
+	}
+	db.timeout = d
+	return db
 }
 
 // PingDB pings a specific database by name
@@ -245,10 +298,19 @@ func (db *DB) Cache(name string, ttl ...time.Duration) *DB {
 	return db
 }
 
+// Timeout sets the query timeout for this DB instance
+func (db *DB) Timeout(d time.Duration) *DB {
+	db.timeout = d
+	return db
+}
+
 func (db *DB) Query(querySQL string, args ...interface{}) ([]Record, error) {
 	if db.lastErr != nil {
 		return nil, db.lastErr
 	}
+	ctx, cancel := db.getContext()
+	defer cancel()
+
 	if db.cacheName != "" {
 		key := GenerateCacheKey(db.dbMgr.name, querySQL, args...)
 		if val, ok := GetCache().CacheGet(db.cacheName, key); ok {
@@ -257,19 +319,22 @@ func (db *DB) Query(querySQL string, args ...interface{}) ([]Record, error) {
 				return results, nil
 			}
 		}
-		results, err := db.dbMgr.query(db.dbMgr.getDB(), querySQL, args...)
+		results, err := db.dbMgr.queryWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 		if err == nil {
 			GetCache().CacheSet(db.cacheName, key, results, getEffectiveTTL(db.cacheName, db.cacheTTL))
 		}
 		return results, err
 	}
-	return db.dbMgr.query(db.dbMgr.getDB(), querySQL, args...)
+	return db.dbMgr.queryWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 }
 
 func (db *DB) QueryFirst(querySQL string, args ...interface{}) (*Record, error) {
 	if db.lastErr != nil {
 		return nil, db.lastErr
 	}
+	ctx, cancel := db.getContext()
+	defer cancel()
+
 	if db.cacheName != "" {
 		key := GenerateCacheKey(db.dbMgr.name, querySQL, args...)
 		if val, ok := GetCache().CacheGet(db.cacheName, key); ok {
@@ -278,13 +343,13 @@ func (db *DB) QueryFirst(querySQL string, args ...interface{}) (*Record, error) 
 				return result, nil
 			}
 		}
-		result, err := db.dbMgr.queryFirst(db.dbMgr.getDB(), querySQL, args...)
+		result, err := db.dbMgr.queryFirstWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 		if err == nil && result != nil {
 			GetCache().CacheSet(db.cacheName, key, result, getEffectiveTTL(db.cacheName, db.cacheTTL))
 		}
 		return result, err
 	}
-	return db.dbMgr.queryFirst(db.dbMgr.getDB(), querySQL, args...)
+	return db.dbMgr.queryFirstWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 }
 
 func (db *DB) QueryToDbModel(dest interface{}, querySQL string, args ...interface{}) error {
@@ -310,6 +375,9 @@ func (db *DB) QueryMap(querySQL string, args ...interface{}) ([]map[string]inter
 	if db.lastErr != nil {
 		return nil, db.lastErr
 	}
+	ctx, cancel := db.getContext()
+	defer cancel()
+
 	if db.cacheName != "" {
 		key := GenerateCacheKey(db.dbMgr.name, querySQL, args...)
 		if val, ok := GetCache().CacheGet(db.cacheName, key); ok {
@@ -318,20 +386,22 @@ func (db *DB) QueryMap(querySQL string, args ...interface{}) ([]map[string]inter
 				return results, nil
 			}
 		}
-		results, err := db.dbMgr.queryMap(db.dbMgr.getDB(), querySQL, args...)
+		results, err := db.dbMgr.queryMapWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 		if err == nil {
 			GetCache().CacheSet(db.cacheName, key, results, getEffectiveTTL(db.cacheName, db.cacheTTL))
 		}
 		return results, err
 	}
-	return db.dbMgr.queryMap(db.dbMgr.getDB(), querySQL, args...)
+	return db.dbMgr.queryMapWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 }
 
 func (db *DB) Exec(querySQL string, args ...interface{}) (sql.Result, error) {
 	if db.lastErr != nil {
 		return nil, db.lastErr
 	}
-	return db.dbMgr.exec(db.dbMgr.getDB(), querySQL, args...)
+	ctx, cancel := db.getContext()
+	defer cancel()
+	return db.dbMgr.execWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 }
 
 func (db *DB) Save(table string, record *Record) (int64, error) {
@@ -348,11 +418,25 @@ func (db *DB) Insert(table string, record *Record) (int64, error) {
 	return db.dbMgr.insert(db.dbMgr.getDB(), table, record)
 }
 
+func (db *DB) insertWithOptions(table string, record *Record, skipTimestamps bool) (int64, error) {
+	if db.lastErr != nil {
+		return 0, db.lastErr
+	}
+	return db.dbMgr.insertWithOptions(db.dbMgr.getDB(), table, record, skipTimestamps)
+}
+
 func (db *DB) Update(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error) {
 	if db.lastErr != nil {
 		return 0, db.lastErr
 	}
 	return db.dbMgr.update(db.dbMgr.getDB(), table, record, whereSql, whereArgs...)
+}
+
+func (db *DB) updateWithOptions(table string, record *Record, whereSql string, skipTimestamps bool, whereArgs ...interface{}) (int64, error) {
+	if db.lastErr != nil {
+		return 0, db.lastErr
+	}
+	return db.dbMgr.updateWithOptions(db.dbMgr.getDB(), table, record, whereSql, skipTimestamps, whereArgs...)
 }
 
 func (db *DB) UpdateRecord(table string, record *Record) (int64, error) {
@@ -385,6 +469,45 @@ func (db *DB) BatchInsert(table string, records []*Record, batchSize int) (int64
 
 func (db *DB) BatchInsertDefault(table string, records []*Record) (int64, error) {
 	return db.BatchInsert(table, records, 100)
+}
+
+// BatchUpdate updates multiple records by primary key
+func (db *DB) BatchUpdate(table string, records []*Record, batchSize int) (int64, error) {
+	if db.lastErr != nil {
+		return 0, db.lastErr
+	}
+	return db.dbMgr.batchUpdate(db.dbMgr.getDB(), table, records, batchSize)
+}
+
+// BatchUpdateDefault updates multiple records with default batch size (100)
+func (db *DB) BatchUpdateDefault(table string, records []*Record) (int64, error) {
+	return db.BatchUpdate(table, records, 100)
+}
+
+// BatchDelete deletes multiple records by primary key
+func (db *DB) BatchDelete(table string, records []*Record, batchSize int) (int64, error) {
+	if db.lastErr != nil {
+		return 0, db.lastErr
+	}
+	return db.dbMgr.batchDelete(db.dbMgr.getDB(), table, records, batchSize)
+}
+
+// BatchDeleteDefault deletes multiple records with default batch size (100)
+func (db *DB) BatchDeleteDefault(table string, records []*Record) (int64, error) {
+	return db.BatchDelete(table, records, 100)
+}
+
+// BatchDeleteByIds deletes records by primary key IDs
+func (db *DB) BatchDeleteByIds(table string, ids []interface{}, batchSize int) (int64, error) {
+	if db.lastErr != nil {
+		return 0, db.lastErr
+	}
+	return db.dbMgr.batchDeleteByIds(db.dbMgr.getDB(), table, ids, batchSize)
+}
+
+// BatchDeleteByIdsDefault deletes records by IDs with default batch size (100)
+func (db *DB) BatchDeleteByIdsDefault(table string, ids []interface{}) (int64, error) {
+	return db.BatchDeleteByIds(table, ids, 100)
 }
 
 func (db *DB) Count(table string, whereSql string, whereArgs ...interface{}) (int64, error) {
@@ -600,7 +723,36 @@ func (tx *Tx) Cache(name string, ttl ...time.Duration) *Tx {
 	return tx
 }
 
+// Timeout sets the query timeout for this transaction
+func (tx *Tx) Timeout(d time.Duration) *Tx {
+	tx.timeout = d
+	return tx
+}
+
+// getTimeout returns the effective timeout for this Tx instance
+func (tx *Tx) getTimeout() time.Duration {
+	if tx.timeout > 0 {
+		return tx.timeout
+	}
+	if tx.dbMgr != nil && tx.dbMgr.config != nil && tx.dbMgr.config.QueryTimeout > 0 {
+		return tx.dbMgr.config.QueryTimeout
+	}
+	return 0
+}
+
+// getContext returns a context with timeout if configured
+func (tx *Tx) getContext() (context.Context, context.CancelFunc) {
+	timeout := tx.getTimeout()
+	if timeout > 0 {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+	return context.Background(), func() {}
+}
+
 func (tx *Tx) Query(querySQL string, args ...interface{}) ([]Record, error) {
+	ctx, cancel := tx.getContext()
+	defer cancel()
+
 	if tx.cacheName != "" {
 		key := GenerateCacheKey(tx.dbMgr.name, querySQL, args...)
 		if val, ok := GetCache().CacheGet(tx.cacheName, key); ok {
@@ -609,16 +761,19 @@ func (tx *Tx) Query(querySQL string, args ...interface{}) ([]Record, error) {
 				return results, nil
 			}
 		}
-		results, err := tx.dbMgr.query(tx.tx, querySQL, args...)
+		results, err := tx.dbMgr.queryWithContext(ctx, tx.tx, querySQL, args...)
 		if err == nil {
 			GetCache().CacheSet(tx.cacheName, key, results, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
 		}
 		return results, err
 	}
-	return tx.dbMgr.query(tx.tx, querySQL, args...)
+	return tx.dbMgr.queryWithContext(ctx, tx.tx, querySQL, args...)
 }
 
 func (tx *Tx) QueryFirst(querySQL string, args ...interface{}) (*Record, error) {
+	ctx, cancel := tx.getContext()
+	defer cancel()
+
 	if tx.cacheName != "" {
 		key := GenerateCacheKey(tx.dbMgr.name, querySQL, args...)
 		if val, ok := GetCache().CacheGet(tx.cacheName, key); ok {
@@ -627,13 +782,13 @@ func (tx *Tx) QueryFirst(querySQL string, args ...interface{}) (*Record, error) 
 				return result, nil
 			}
 		}
-		result, err := tx.dbMgr.queryFirst(tx.tx, querySQL, args...)
+		result, err := tx.dbMgr.queryFirstWithContext(ctx, tx.tx, querySQL, args...)
 		if err == nil && result != nil {
 			GetCache().CacheSet(tx.cacheName, key, result, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
 		}
 		return result, err
 	}
-	return tx.dbMgr.queryFirst(tx.tx, querySQL, args...)
+	return tx.dbMgr.queryFirstWithContext(ctx, tx.tx, querySQL, args...)
 }
 
 func (tx *Tx) QueryToDbModel(dest interface{}, querySQL string, args ...interface{}) error {
@@ -656,6 +811,9 @@ func (tx *Tx) QueryFirstToDbModel(dest interface{}, querySQL string, args ...int
 }
 
 func (tx *Tx) QueryMap(querySQL string, args ...interface{}) ([]map[string]interface{}, error) {
+	ctx, cancel := tx.getContext()
+	defer cancel()
+
 	if tx.cacheName != "" {
 		key := GenerateCacheKey(tx.dbMgr.name, querySQL, args...)
 		if val, ok := GetCache().CacheGet(tx.cacheName, key); ok {
@@ -664,17 +822,19 @@ func (tx *Tx) QueryMap(querySQL string, args ...interface{}) ([]map[string]inter
 				return results, nil
 			}
 		}
-		results, err := tx.dbMgr.queryMap(tx.tx, querySQL, args...)
+		results, err := tx.dbMgr.queryMapWithContext(ctx, tx.tx, querySQL, args...)
 		if err == nil {
 			GetCache().CacheSet(tx.cacheName, key, results, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
 		}
 		return results, err
 	}
-	return tx.dbMgr.queryMap(tx.tx, querySQL, args...)
+	return tx.dbMgr.queryMapWithContext(ctx, tx.tx, querySQL, args...)
 }
 
 func (tx *Tx) Exec(querySQL string, args ...interface{}) (sql.Result, error) {
-	return tx.dbMgr.exec(tx.tx, querySQL, args...)
+	ctx, cancel := tx.getContext()
+	defer cancel()
+	return tx.dbMgr.execWithContext(ctx, tx.tx, querySQL, args...)
 }
 
 func (tx *Tx) Save(table string, record *Record) (int64, error) {
@@ -685,8 +845,16 @@ func (tx *Tx) Insert(table string, record *Record) (int64, error) {
 	return tx.dbMgr.insert(tx.tx, table, record)
 }
 
+func (tx *Tx) insertWithOptions(table string, record *Record, skipTimestamps bool) (int64, error) {
+	return tx.dbMgr.insertWithOptions(tx.tx, table, record, skipTimestamps)
+}
+
 func (tx *Tx) Update(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error) {
 	return tx.dbMgr.update(tx.tx, table, record, whereSql, whereArgs...)
+}
+
+func (tx *Tx) updateWithOptions(table string, record *Record, whereSql string, skipTimestamps bool, whereArgs ...interface{}) (int64, error) {
+	return tx.dbMgr.updateWithOptions(tx.tx, table, record, whereSql, skipTimestamps, whereArgs...)
 }
 
 func (tx *Tx) UpdateRecord(table string, record *Record) (int64, error) {
@@ -707,6 +875,36 @@ func (tx *Tx) BatchInsert(table string, records []*Record, batchSize int) (int64
 
 func (tx *Tx) BatchInsertDefault(table string, records []*Record) (int64, error) {
 	return tx.BatchInsert(table, records, 100)
+}
+
+// BatchUpdate updates multiple records by primary key within transaction
+func (tx *Tx) BatchUpdate(table string, records []*Record, batchSize int) (int64, error) {
+	return tx.dbMgr.batchUpdate(tx.tx, table, records, batchSize)
+}
+
+// BatchUpdateDefault updates multiple records with default batch size (100)
+func (tx *Tx) BatchUpdateDefault(table string, records []*Record) (int64, error) {
+	return tx.BatchUpdate(table, records, 100)
+}
+
+// BatchDelete deletes multiple records by primary key within transaction
+func (tx *Tx) BatchDelete(table string, records []*Record, batchSize int) (int64, error) {
+	return tx.dbMgr.batchDelete(tx.tx, table, records, batchSize)
+}
+
+// BatchDeleteDefault deletes multiple records with default batch size (100)
+func (tx *Tx) BatchDeleteDefault(table string, records []*Record) (int64, error) {
+	return tx.BatchDelete(table, records, 100)
+}
+
+// BatchDeleteByIds deletes records by primary key IDs within transaction
+func (tx *Tx) BatchDeleteByIds(table string, ids []interface{}, batchSize int) (int64, error) {
+	return tx.dbMgr.batchDeleteByIds(tx.tx, table, ids, batchSize)
+}
+
+// BatchDeleteByIdsDefault deletes records by IDs with default batch size (100)
+func (tx *Tx) BatchDeleteByIdsDefault(table string, ids []interface{}) (int64, error) {
+	return tx.BatchDeleteByIds(table, ids, 100)
 }
 
 func (tx *Tx) Count(table string, whereSql string, whereArgs ...interface{}) (int64, error) {

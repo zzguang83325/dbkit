@@ -1,6 +1,7 @@
 package dbkit
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"regexp"
@@ -47,6 +48,7 @@ type Config struct {
 	MaxOpen         int           // Maximum number of open connections
 	MaxIdle         int           // Maximum number of idle connections
 	ConnMaxLifetime time.Duration // Maximum connection lifetime
+	QueryTimeout    time.Duration // Default query timeout (0 means no timeout)
 }
 
 // SupportedDrivers returns a list of all supported database drivers
@@ -70,6 +72,7 @@ type DB struct {
 	lastErr   error
 	cacheName string
 	cacheTTL  time.Duration
+	timeout   time.Duration // Query timeout for this instance
 }
 
 // GetConfig returns the database configuration
@@ -80,12 +83,33 @@ func (db *DB) GetConfig() (*Config, error) {
 	return db.dbMgr.GetConfig()
 }
 
+// getTimeout returns the effective timeout for this DB instance
+func (db *DB) getTimeout() time.Duration {
+	if db.timeout > 0 {
+		return db.timeout
+	}
+	if db.dbMgr != nil && db.dbMgr.config != nil && db.dbMgr.config.QueryTimeout > 0 {
+		return db.dbMgr.config.QueryTimeout
+	}
+	return 0
+}
+
+// getContext returns a context with timeout if configured
+func (db *DB) getContext() (context.Context, context.CancelFunc) {
+	timeout := db.getTimeout()
+	if timeout > 0 {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+	return context.Background(), func() {}
+}
+
 // Tx represents a database transaction with chainable methods
 type Tx struct {
 	tx        *sql.Tx
 	dbMgr     *dbManager
 	cacheName string
 	cacheTTL  time.Duration
+	timeout   time.Duration // Query timeout for this transaction
 }
 
 // sqlExecutor is an internal interface for executing SQL commands
@@ -95,15 +119,25 @@ type sqlExecutor interface {
 	QueryRow(query string, args ...interface{}) *sql.Row
 }
 
+// sqlExecutorContext is an internal interface for executing SQL commands with context
+type sqlExecutorContext interface {
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+}
+
 // dbManager manages database connections
 type dbManager struct {
-	name          string
-	config        *Config
-	db            *sql.DB
-	mu            sync.RWMutex
-	drivers       map[string]bool
-	pkCache       map[string][]string // Table name -> PK column names
-	identityCache map[string]string   // Table name -> Identity column name
+	name            string
+	config          *Config
+	db              *sql.DB
+	mu              sync.RWMutex
+	drivers         map[string]bool
+	pkCache         map[string][]string     // Table name -> PK column names
+	identityCache   map[string]string       // Table name -> Identity column name
+	softDeletes     *softDeleteRegistry     // Soft delete configurations
+	timestamps      *timestampRegistry      // Auto timestamp configurations
+	optimisticLocks *optimisticLockRegistry // Optimistic lock configurations
 }
 
 // MultiDBManager manages multiple database connections
@@ -247,9 +281,22 @@ func (mgr *dbManager) prepareQuerySQL(querySQL string, args ...interface{}) (str
 }
 
 func (mgr *dbManager) query(executor sqlExecutor, querySQL string, args ...interface{}) ([]Record, error) {
+	return mgr.queryWithContext(context.Background(), executor, querySQL, args...)
+}
+
+func (mgr *dbManager) queryWithContext(ctx context.Context, executor sqlExecutor, querySQL string, args ...interface{}) ([]Record, error) {
 	querySQL, args = mgr.prepareQuerySQL(querySQL, args...)
 	start := time.Now()
-	rows, err := executor.Query(querySQL, args...)
+
+	var rows *sql.Rows
+	var err error
+
+	// Use context version if executor supports it
+	if execCtx, ok := executor.(sqlExecutorContext); ok {
+		rows, err = execCtx.QueryContext(ctx, querySQL, args...)
+	} else {
+		rows, err = executor.Query(querySQL, args...)
+	}
 	mgr.logTrace(start, querySQL, args, err)
 
 	if err != nil {
@@ -265,12 +312,20 @@ func (mgr *dbManager) query(executor sqlExecutor, querySQL string, args ...inter
 }
 
 func (mgr *dbManager) queryFirst(executor sqlExecutor, querySQL string, args ...interface{}) (*Record, error) {
+	return mgr.queryFirstWithContext(context.Background(), executor, querySQL, args...)
+}
+
+func (mgr *dbManager) queryFirstWithContext(ctx context.Context, executor sqlExecutor, querySQL string, args ...interface{}) (*Record, error) {
 	querySQL = mgr.addLimitOne(querySQL)
-	return mgr.queryFirstInternal(executor, querySQL, args...)
+	return mgr.queryFirstInternalWithContext(ctx, executor, querySQL, args...)
 }
 
 func (mgr *dbManager) queryFirstInternal(executor sqlExecutor, querySQL string, args ...interface{}) (*Record, error) {
-	records, err := mgr.query(executor, querySQL, args...)
+	return mgr.queryFirstInternalWithContext(context.Background(), executor, querySQL, args...)
+}
+
+func (mgr *dbManager) queryFirstInternalWithContext(ctx context.Context, executor sqlExecutor, querySQL string, args ...interface{}) (*Record, error) {
+	records, err := mgr.queryWithContext(ctx, executor, querySQL, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -281,9 +336,21 @@ func (mgr *dbManager) queryFirstInternal(executor sqlExecutor, querySQL string, 
 }
 
 func (mgr *dbManager) queryMap(executor sqlExecutor, querySQL string, args ...interface{}) ([]map[string]interface{}, error) {
+	return mgr.queryMapWithContext(context.Background(), executor, querySQL, args...)
+}
+
+func (mgr *dbManager) queryMapWithContext(ctx context.Context, executor sqlExecutor, querySQL string, args ...interface{}) ([]map[string]interface{}, error) {
 	querySQL, args = mgr.prepareQuerySQL(querySQL, args...)
 	start := time.Now()
-	rows, err := executor.Query(querySQL, args...)
+
+	var rows *sql.Rows
+	var err error
+
+	if execCtx, ok := executor.(sqlExecutorContext); ok {
+		rows, err = execCtx.QueryContext(ctx, querySQL, args...)
+	} else {
+		rows, err = executor.Query(querySQL, args...)
+	}
 	mgr.logTrace(start, querySQL, args, err)
 
 	if err != nil {
@@ -332,10 +399,22 @@ func (mgr *dbManager) addLimitOne(querySQL string) string {
 }
 
 func (mgr *dbManager) exec(executor sqlExecutor, querySQL string, args ...interface{}) (sql.Result, error) {
+	return mgr.execWithContext(context.Background(), executor, querySQL, args...)
+}
+
+func (mgr *dbManager) execWithContext(ctx context.Context, executor sqlExecutor, querySQL string, args ...interface{}) (sql.Result, error) {
 	querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
 	args = mgr.sanitizeArgs(querySQL, args)
 	start := time.Now()
-	result, err := executor.Exec(querySQL, args...)
+
+	var result sql.Result
+	var err error
+
+	if execCtx, ok := executor.(sqlExecutorContext); ok {
+		result, err = execCtx.ExecContext(ctx, querySQL, args...)
+	} else {
+		result, err = executor.Exec(querySQL, args...)
+	}
 	mgr.logTrace(start, querySQL, args, err)
 
 	if err != nil {
@@ -654,6 +733,35 @@ func (mgr *dbManager) save(executor sqlExecutor, table string, record *Record) (
 	}
 
 	if allPKsFound {
+		// Check if optimistic lock is configured and record has version field
+		// If so, we need to use update instead of upsert to properly check version
+		config := mgr.getOptimisticLockConfig(table)
+		if config != nil && config.VersionField != "" {
+			if _, hasVersion := mgr.getVersionFromRecord(table, record); hasVersion {
+				// Record has version field, use update with version check
+				where := strings.Join(pkConditions, " AND ")
+				updateRecord := NewRecord()
+				columns, _ := mgr.getOrderedColumns(record)
+				for _, k := range columns {
+					v := record.columns[k]
+					isPK := false
+					for _, pk := range pks {
+						if strings.EqualFold(k, pk) {
+							isPK = true
+							break
+						}
+					}
+					if !isPK {
+						updateRecord.Set(k, v)
+					}
+				}
+				if len(updateRecord.columns) > 0 {
+					return mgr.update(executor, table, updateRecord, where, pkValues...)
+				}
+				return 0, nil
+			}
+		}
+
 		// 如果是 MySQL, PostgreSQL, SQLite, Oracle, SQLServer，使用原生的 Upsert 语法
 		driver := mgr.config.Driver
 		if driver == MySQL || driver == PostgreSQL || driver == SQLite3 || driver == Oracle || driver == SQLServer {
@@ -717,6 +825,9 @@ func (mgr *dbManager) nativeUpsert(executor sqlExecutor, table string, record *R
 	if driver == Oracle || driver == SQLServer {
 		return mgr.mergeUpsert(executor, table, record, pks)
 	}
+
+	// Apply version initialization for optimistic lock (for INSERT part of upsert)
+	mgr.applyVersionInit(table, record)
 
 	columns, values := mgr.getOrderedColumns(record)
 	var placeholders []string
@@ -815,6 +926,10 @@ func (mgr *dbManager) nativeUpsert(executor sqlExecutor, table string, record *R
 
 func (mgr *dbManager) mergeUpsert(executor sqlExecutor, table string, record *Record, pks []string) (int64, error) {
 	driver := mgr.config.Driver
+
+	// Apply version initialization for optimistic lock (for INSERT part of merge)
+	mgr.applyVersionInit(table, record)
+
 	columns, values := mgr.getOrderedColumns(record)
 
 	// 构造 USING 子句
@@ -909,12 +1024,22 @@ func (mgr *dbManager) mergeUpsert(executor sqlExecutor, table string, record *Re
 }
 
 func (mgr *dbManager) insert(executor sqlExecutor, table string, record *Record) (int64, error) {
+	return mgr.insertWithOptions(executor, table, record, false)
+}
+
+func (mgr *dbManager) insertWithOptions(executor sqlExecutor, table string, record *Record, skipTimestamps bool) (int64, error) {
 	if err := validateIdentifier(table); err != nil {
 		return 0, err
 	}
 	if record == nil || len(record.columns) == 0 {
 		return 0, fmt.Errorf("record is empty")
 	}
+
+	// Apply created_at timestamp
+	mgr.applyCreatedAtTimestamp(table, record, skipTimestamps)
+
+	// Apply version initialization for optimistic lock
+	mgr.applyVersionInit(table, record)
 
 	columns, values := mgr.getOrderedColumns(record)
 	var placeholders []string
@@ -1048,6 +1173,10 @@ func (mgr *dbManager) insert(executor sqlExecutor, table string, record *Record)
 }
 
 func (mgr *dbManager) update(executor sqlExecutor, table string, record *Record, where string, whereArgs ...interface{}) (int64, error) {
+	return mgr.updateWithOptions(executor, table, record, where, false, whereArgs...)
+}
+
+func (mgr *dbManager) updateWithOptions(executor sqlExecutor, table string, record *Record, where string, skipTimestamps bool, whereArgs ...interface{}) (int64, error) {
 	if err := validateIdentifier(table); err != nil {
 		return 0, err
 	}
@@ -1055,10 +1184,43 @@ func (mgr *dbManager) update(executor sqlExecutor, table string, record *Record,
 		return 0, fmt.Errorf("record is empty")
 	}
 
+	// Apply updated_at timestamp
+	mgr.applyUpdatedAtTimestamp(table, record, skipTimestamps)
+
+	// Check for optimistic lock
+	versionChecked := false
+	var currentVersion int64
+	config := mgr.getOptimisticLockConfig(table)
+	if config != nil && config.VersionField != "" {
+		if ver, ok := mgr.getVersionFromRecord(table, record); ok {
+			currentVersion = ver
+			versionChecked = true
+			// Remove version from record so it's not in the regular SET clause
+			// We'll add it separately with increment
+			record.Remove(config.VersionField)
+		}
+	}
+
 	columns, values := mgr.getOrderedColumns(record)
 	var setClauses []string
 	for _, col := range columns {
 		setClauses = append(setClauses, fmt.Sprintf("%s = ?", col))
+	}
+
+	// Add version increment to SET clause if optimistic lock is enabled and version was found
+	if versionChecked && config != nil {
+		setClauses = append(setClauses, fmt.Sprintf("%s = ?", config.VersionField))
+		values = append(values, currentVersion+1)
+	}
+
+	// Add version check to WHERE clause
+	if versionChecked && config != nil {
+		if where != "" {
+			where = fmt.Sprintf("(%s) AND %s = ?", where, config.VersionField)
+		} else {
+			where = fmt.Sprintf("%s = ?", config.VersionField)
+		}
+		whereArgs = append(whereArgs, currentVersion)
 	}
 
 	values = append(values, whereArgs...)
@@ -1078,7 +1240,18 @@ func (mgr *dbManager) update(executor sqlExecutor, table string, record *Record,
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected()
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	// If version was checked and no rows were affected, it's a version mismatch
+	if versionChecked && rowsAffected == 0 {
+		return 0, ErrVersionMismatch
+	}
+
+	return rowsAffected, nil
 }
 
 func (mgr *dbManager) delete(executor sqlExecutor, table string, where string, whereArgs ...interface{}) (int64, error) {
@@ -1087,6 +1260,11 @@ func (mgr *dbManager) delete(executor sqlExecutor, table string, where string, w
 	}
 	if where == "" {
 		return 0, fmt.Errorf("where condition is required for delete")
+	}
+
+	// Check if soft delete is configured for this table
+	if mgr.hasSoftDelete(table) {
+		return mgr.softDelete(executor, table, where, whereArgs...)
 	}
 
 	querySQL := fmt.Sprintf("DELETE FROM %s WHERE %s", table, where)
@@ -1349,6 +1527,320 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 		affected, _ := result.RowsAffected()
 		totalAffected += affected
 	}
+	return totalAffected, nil
+}
+
+// batchUpdate 批量更新记录（根据主键）
+func (mgr *dbManager) batchUpdate(executor sqlExecutor, table string, records []*Record, batchSize int) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
+	if len(records) == 0 {
+		return 0, fmt.Errorf("no records to update")
+	}
+
+	// 获取表的主键
+	pks, err := mgr.getPrimaryKeys(executor, table)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get primary keys: %v", err)
+	}
+	if len(pks) == 0 {
+		return 0, fmt.Errorf("table %s has no primary key, cannot use BatchUpdate", table)
+	}
+
+	var totalAffected int64
+
+	// 分批处理
+	for i := 0; i < len(records); i += batchSize {
+		end := i + batchSize
+		if end > len(records) {
+			end = len(records)
+		}
+
+		batch := records[i:end]
+
+		// 使用预处理语句优化批量更新
+		if len(batch) > 0 {
+			// 获取第一条记录的列（排除主键）
+			columns, _ := mgr.getOrderedColumns(batch[0])
+			var updateCols []string
+			for _, col := range columns {
+				isPK := false
+				for _, pk := range pks {
+					if strings.EqualFold(col, pk) {
+						isPK = true
+						break
+					}
+				}
+				if !isPK {
+					updateCols = append(updateCols, col)
+				}
+			}
+
+			if len(updateCols) == 0 {
+				continue // 只有主键，无需更新
+			}
+
+			// 构建 UPDATE SQL
+			var setClauses []string
+			for _, col := range updateCols {
+				setClauses = append(setClauses, fmt.Sprintf("%s = ?", col))
+			}
+
+			var whereClauses []string
+			for _, pk := range pks {
+				whereClauses = append(whereClauses, fmt.Sprintf("%s = ?", pk))
+			}
+
+			querySQL := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
+				table, strings.Join(setClauses, ", "), strings.Join(whereClauses, " AND "))
+			querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
+
+			// 尝试使用预处理语句
+			if preparer, ok := executor.(interface {
+				Prepare(query string) (*sql.Stmt, error)
+			}); ok {
+				stmt, err := preparer.Prepare(querySQL)
+				if err == nil {
+					defer stmt.Close()
+
+					for _, record := range batch {
+						var values []interface{}
+						// 先添加 SET 子句的值
+						for _, col := range updateCols {
+							values = append(values, record.Get(col))
+						}
+						// 再添加 WHERE 子句的值（主键）
+						for _, pk := range pks {
+							values = append(values, record.Get(pk))
+						}
+
+						start := time.Now()
+						result, err := stmt.Exec(values...)
+						mgr.logTrace(start, querySQL, values, err)
+						if err != nil {
+							return totalAffected, err
+						}
+						affected, _ := result.RowsAffected()
+						totalAffected += affected
+					}
+					continue
+				}
+			}
+
+			// 回退到单条执行
+			for _, record := range batch {
+				var values []interface{}
+				for _, col := range updateCols {
+					values = append(values, record.Get(col))
+				}
+				for _, pk := range pks {
+					values = append(values, record.Get(pk))
+				}
+
+				start := time.Now()
+				result, err := executor.Exec(querySQL, values...)
+				mgr.logTrace(start, querySQL, values, err)
+				if err != nil {
+					return totalAffected, err
+				}
+				affected, _ := result.RowsAffected()
+				totalAffected += affected
+			}
+		}
+	}
+
+	return totalAffected, nil
+}
+
+// batchDelete 批量删除记录（根据主键）
+func (mgr *dbManager) batchDelete(executor sqlExecutor, table string, records []*Record, batchSize int) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
+	if len(records) == 0 {
+		return 0, fmt.Errorf("no records to delete")
+	}
+
+	// 获取表的主键
+	pks, err := mgr.getPrimaryKeys(executor, table)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get primary keys: %v", err)
+	}
+	if len(pks) == 0 {
+		return 0, fmt.Errorf("table %s has no primary key, cannot use BatchDelete", table)
+	}
+
+	var totalAffected int64
+	driver := mgr.config.Driver
+
+	// 分批处理
+	for i := 0; i < len(records); i += batchSize {
+		end := i + batchSize
+		if end > len(records) {
+			end = len(records)
+		}
+
+		batch := records[i:end]
+
+		// 对于单主键，使用 IN 子句优化
+		if len(pks) == 1 {
+			pk := pks[0]
+			var pkValues []interface{}
+			var placeholders []string
+
+			for idx, record := range batch {
+				pkVal := record.Get(pk)
+				if pkVal == nil {
+					continue
+				}
+				pkValues = append(pkValues, pkVal)
+				if driver == PostgreSQL {
+					placeholders = append(placeholders, fmt.Sprintf("$%d", idx+1))
+				} else if driver == SQLServer {
+					placeholders = append(placeholders, fmt.Sprintf("@p%d", idx+1))
+				} else if driver == Oracle {
+					placeholders = append(placeholders, fmt.Sprintf(":%d", idx+1))
+				} else {
+					placeholders = append(placeholders, "?")
+				}
+			}
+
+			if len(pkValues) == 0 {
+				continue
+			}
+
+			querySQL := fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)",
+				table, pk, strings.Join(placeholders, ", "))
+
+			start := time.Now()
+			result, err := executor.Exec(querySQL, pkValues...)
+			mgr.logTrace(start, querySQL, pkValues, err)
+			if err != nil {
+				return totalAffected, err
+			}
+			affected, _ := result.RowsAffected()
+			totalAffected += affected
+		} else {
+			// 复合主键，使用预处理语句逐条删除
+			var whereClauses []string
+			for _, pk := range pks {
+				whereClauses = append(whereClauses, fmt.Sprintf("%s = ?", pk))
+			}
+
+			querySQL := fmt.Sprintf("DELETE FROM %s WHERE %s",
+				table, strings.Join(whereClauses, " AND "))
+			querySQL = mgr.convertPlaceholder(querySQL, driver)
+
+			// 尝试使用预处理语句
+			if preparer, ok := executor.(interface {
+				Prepare(query string) (*sql.Stmt, error)
+			}); ok {
+				stmt, err := preparer.Prepare(querySQL)
+				if err == nil {
+					defer stmt.Close()
+
+					for _, record := range batch {
+						var pkValues []interface{}
+						for _, pk := range pks {
+							pkValues = append(pkValues, record.Get(pk))
+						}
+
+						start := time.Now()
+						result, err := stmt.Exec(pkValues...)
+						mgr.logTrace(start, querySQL, pkValues, err)
+						if err != nil {
+							return totalAffected, err
+						}
+						affected, _ := result.RowsAffected()
+						totalAffected += affected
+					}
+					continue
+				}
+			}
+
+			// 回退到单条执行
+			for _, record := range batch {
+				var pkValues []interface{}
+				for _, pk := range pks {
+					pkValues = append(pkValues, record.Get(pk))
+				}
+
+				start := time.Now()
+				result, err := executor.Exec(querySQL, pkValues...)
+				mgr.logTrace(start, querySQL, pkValues, err)
+				if err != nil {
+					return totalAffected, err
+				}
+				affected, _ := result.RowsAffected()
+				totalAffected += affected
+			}
+		}
+	}
+
+	return totalAffected, nil
+}
+
+// batchDeleteByIds 根据主键ID列表批量删除
+func (mgr *dbManager) batchDeleteByIds(executor sqlExecutor, table string, ids []interface{}, batchSize int) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("no ids to delete")
+	}
+
+	// 获取表的主键
+	pks, err := mgr.getPrimaryKeys(executor, table)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get primary keys: %v", err)
+	}
+	if len(pks) == 0 {
+		return 0, fmt.Errorf("table %s has no primary key", table)
+	}
+	if len(pks) > 1 {
+		return 0, fmt.Errorf("BatchDeleteByIds only supports single primary key tables")
+	}
+
+	pk := pks[0]
+	var totalAffected int64
+	driver := mgr.config.Driver
+
+	// 分批处理
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+
+		batch := ids[i:end]
+		var placeholders []string
+
+		for idx := range batch {
+			if driver == PostgreSQL {
+				placeholders = append(placeholders, fmt.Sprintf("$%d", idx+1))
+			} else if driver == SQLServer {
+				placeholders = append(placeholders, fmt.Sprintf("@p%d", idx+1))
+			} else if driver == Oracle {
+				placeholders = append(placeholders, fmt.Sprintf(":%d", idx+1))
+			} else {
+				placeholders = append(placeholders, "?")
+			}
+		}
+
+		querySQL := fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)",
+			table, pk, strings.Join(placeholders, ", "))
+
+		start := time.Now()
+		result, err := executor.Exec(querySQL, batch...)
+		mgr.logTrace(start, querySQL, batch, err)
+		if err != nil {
+			return totalAffected, err
+		}
+		affected, _ := result.RowsAffected()
+		totalAffected += affected
+	}
+
 	return totalAffected, nil
 }
 
@@ -1940,4 +2432,187 @@ func (mgr *dbManager) logTrace(start time.Time, sql string, args []interface{}, 
 // joinStrings joins strings with commas
 func joinStrings(strs []string) string {
 	return strings.Join(strs, ", ")
+}
+
+// PoolStats represents database connection pool statistics
+type PoolStats struct {
+	// Database name
+	DBName string `json:"db_name"`
+	// Driver type
+	Driver string `json:"driver"`
+	// Maximum number of open connections (configured)
+	MaxOpenConnections int `json:"max_open_connections"`
+	// Current number of open connections (in use + idle)
+	OpenConnections int `json:"open_connections"`
+	// Number of connections currently in use
+	InUse int `json:"in_use"`
+	// Number of idle connections
+	Idle int `json:"idle"`
+	// Total number of connections waited for
+	WaitCount int64 `json:"wait_count"`
+	// Total time blocked waiting for a new connection
+	WaitDuration time.Duration `json:"wait_duration"`
+	// Total number of connections closed due to MaxIdleTime
+	MaxIdleClosed int64 `json:"max_idle_closed"`
+	// Total number of connections closed due to MaxLifetime
+	MaxLifetimeClosed int64 `json:"max_lifetime_closed"`
+}
+
+// PoolStats returns the connection pool statistics for the DB instance
+func (db *DB) PoolStats() *PoolStats {
+	if db.lastErr != nil || db.dbMgr == nil || db.dbMgr.db == nil {
+		return nil
+	}
+	return db.dbMgr.poolStats()
+}
+
+// poolStats returns the connection pool statistics
+func (mgr *dbManager) poolStats() *PoolStats {
+	if mgr == nil || mgr.db == nil {
+		return nil
+	}
+
+	stats := mgr.db.Stats()
+	return &PoolStats{
+		DBName:             mgr.name,
+		Driver:             string(mgr.config.Driver),
+		MaxOpenConnections: stats.MaxOpenConnections,
+		OpenConnections:    stats.OpenConnections,
+		InUse:              stats.InUse,
+		Idle:               stats.Idle,
+		WaitCount:          stats.WaitCount,
+		WaitDuration:       stats.WaitDuration,
+		MaxIdleClosed:      stats.MaxIdleClosed,
+		MaxLifetimeClosed:  stats.MaxLifetimeClosed,
+	}
+}
+
+// GetPoolStats returns the connection pool statistics for the default database
+func GetPoolStats() *PoolStats {
+	db, err := defaultDB()
+	if err != nil {
+		return nil
+	}
+	return db.PoolStats()
+}
+
+// GetPoolStatsDB returns the connection pool statistics for a specific database
+func GetPoolStatsDB(dbname string) *PoolStats {
+	return Use(dbname).PoolStats()
+}
+
+// AllPoolStats returns the connection pool statistics for all registered databases
+func AllPoolStats() map[string]*PoolStats {
+	result := make(map[string]*PoolStats)
+
+	if multiMgr == nil {
+		return result
+	}
+
+	multiMgr.mu.RLock()
+	defer multiMgr.mu.RUnlock()
+
+	for name, mgr := range multiMgr.databases {
+		if mgr != nil && mgr.db != nil {
+			result[name] = mgr.poolStats()
+		}
+	}
+
+	return result
+}
+
+// PoolStatsMap returns the connection pool statistics as a map (for JSON serialization)
+func (ps *PoolStats) ToMap() map[string]interface{} {
+	if ps == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"db_name":              ps.DBName,
+		"driver":               ps.Driver,
+		"max_open_connections": ps.MaxOpenConnections,
+		"open_connections":     ps.OpenConnections,
+		"in_use":               ps.InUse,
+		"idle":                 ps.Idle,
+		"wait_count":           ps.WaitCount,
+		"wait_duration_ms":     ps.WaitDuration.Milliseconds(),
+		"max_idle_closed":      ps.MaxIdleClosed,
+		"max_lifetime_closed":  ps.MaxLifetimeClosed,
+	}
+}
+
+// String returns a human-readable string representation of the pool stats
+func (ps *PoolStats) String() string {
+	if ps == nil {
+		return "PoolStats: nil"
+	}
+	return fmt.Sprintf(
+		"PoolStats[%s/%s]: Open=%d (InUse=%d, Idle=%d), MaxOpen=%d, WaitCount=%d, WaitDuration=%v",
+		ps.DBName, ps.Driver,
+		ps.OpenConnections, ps.InUse, ps.Idle,
+		ps.MaxOpenConnections, ps.WaitCount, ps.WaitDuration,
+	)
+}
+
+// PrometheusMetrics returns Prometheus-compatible metrics string
+func (ps *PoolStats) PrometheusMetrics() string {
+	if ps == nil {
+		return ""
+	}
+
+	dbLabel := fmt.Sprintf(`db="%s",driver="%s"`, ps.DBName, ps.Driver)
+
+	return fmt.Sprintf(`# HELP dbkit_pool_max_open_connections Maximum number of open connections to the database.
+# TYPE dbkit_pool_max_open_connections gauge
+dbkit_pool_max_open_connections{%s} %d
+
+# HELP dbkit_pool_open_connections The number of established connections both in use and idle.
+# TYPE dbkit_pool_open_connections gauge
+dbkit_pool_open_connections{%s} %d
+
+# HELP dbkit_pool_in_use The number of connections currently in use.
+# TYPE dbkit_pool_in_use gauge
+dbkit_pool_in_use{%s} %d
+
+# HELP dbkit_pool_idle The number of idle connections.
+# TYPE dbkit_pool_idle gauge
+dbkit_pool_idle{%s} %d
+
+# HELP dbkit_pool_wait_count_total The total number of connections waited for.
+# TYPE dbkit_pool_wait_count_total counter
+dbkit_pool_wait_count_total{%s} %d
+
+# HELP dbkit_pool_wait_duration_seconds_total The total time blocked waiting for a new connection.
+# TYPE dbkit_pool_wait_duration_seconds_total counter
+dbkit_pool_wait_duration_seconds_total{%s} %f
+
+# HELP dbkit_pool_max_idle_closed_total The total number of connections closed due to SetMaxIdleConns.
+# TYPE dbkit_pool_max_idle_closed_total counter
+dbkit_pool_max_idle_closed_total{%s} %d
+
+# HELP dbkit_pool_max_lifetime_closed_total The total number of connections closed due to SetConnMaxLifetime.
+# TYPE dbkit_pool_max_lifetime_closed_total counter
+dbkit_pool_max_lifetime_closed_total{%s} %d
+`,
+		dbLabel, ps.MaxOpenConnections,
+		dbLabel, ps.OpenConnections,
+		dbLabel, ps.InUse,
+		dbLabel, ps.Idle,
+		dbLabel, ps.WaitCount,
+		dbLabel, ps.WaitDuration.Seconds(),
+		dbLabel, ps.MaxIdleClosed,
+		dbLabel, ps.MaxLifetimeClosed,
+	)
+}
+
+// AllPrometheusMetrics returns Prometheus metrics for all databases
+func AllPrometheusMetrics() string {
+	allStats := AllPoolStats()
+	var result strings.Builder
+
+	for _, stats := range allStats {
+		result.WriteString(stats.PrometheusMetrics())
+		result.WriteString("\n")
+	}
+
+	return result.String()
 }

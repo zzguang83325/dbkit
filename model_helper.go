@@ -1,6 +1,16 @@
 package dbkit
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
+// Error definitions for model operations
+var (
+	ErrNoPrimaryKey       = fmt.Errorf("dbkit: table has no primary key")
+	ErrPrimaryKeyNotFound = fmt.Errorf("dbkit: primary key not found in record")
+)
 
 // ModelCache 用于在 Model 中存储缓存配置，可嵌入到生成的 Model 中
 type ModelCache struct {
@@ -58,4 +68,84 @@ func PaginateModel[T IDbModel](model T, cache *ModelCache, page, pageSize int, w
 		return nil, err
 	}
 	return RecordPageToDbModelPage[T](recordsPage)
+}
+
+// --- Soft Delete Model Helpers ---
+
+// ForceDeleteModel performs a physical delete on a soft-delete enabled model
+func ForceDeleteModel(model IDbModel) (int64, error) {
+	record := ToRecord(model)
+	db := Use(model.DatabaseName())
+
+	// Get primary keys
+	pks, err := db.dbMgr.getPrimaryKeys(db.dbMgr.getDB(), model.TableName())
+	if err != nil {
+		return 0, err
+	}
+	if len(pks) == 0 {
+		return 0, ErrNoPrimaryKey
+	}
+
+	// Build WHERE clause from primary keys
+	var whereClauses []string
+	var whereArgs []interface{}
+	for _, pk := range pks {
+		if !record.Has(pk) {
+			return 0, ErrPrimaryKeyNotFound
+		}
+		whereClauses = append(whereClauses, pk+" = ?")
+		whereArgs = append(whereArgs, record.Get(pk))
+	}
+
+	return db.ForceDelete(model.TableName(), strings.Join(whereClauses, " AND "), whereArgs...)
+}
+
+// RestoreModel restores a soft-deleted model
+func RestoreModel(model IDbModel) (int64, error) {
+	record := ToRecord(model)
+	db := Use(model.DatabaseName())
+
+	// Get primary keys
+	pks, err := db.dbMgr.getPrimaryKeys(db.dbMgr.getDB(), model.TableName())
+	if err != nil {
+		return 0, err
+	}
+	if len(pks) == 0 {
+		return 0, ErrNoPrimaryKey
+	}
+
+	// Build WHERE clause from primary keys
+	var whereClauses []string
+	var whereArgs []interface{}
+	for _, pk := range pks {
+		if !record.Has(pk) {
+			return 0, ErrPrimaryKeyNotFound
+		}
+		whereClauses = append(whereClauses, pk+" = ?")
+		whereArgs = append(whereArgs, record.Get(pk))
+	}
+
+	return db.Restore(model.TableName(), strings.Join(whereClauses, " AND "), whereArgs...)
+}
+
+// FindModelWithTrashed queries records including soft-deleted ones
+func FindModelWithTrashed[T IDbModel](model T, cache *ModelCache, whereSql, orderBySql string, whereArgs ...interface{}) ([]T, error) {
+	var results []T
+	db := Use(model.DatabaseName())
+	if cache != nil && cache.CacheName != "" {
+		db = db.Cache(cache.CacheName, cache.CacheTTL)
+	}
+	err := db.Table(model.TableName()).WithTrashed().Where(whereSql, whereArgs...).OrderBy(orderBySql).FindToDbModel(&results)
+	return results, err
+}
+
+// FindModelOnlyTrashed queries only soft-deleted records
+func FindModelOnlyTrashed[T IDbModel](model T, cache *ModelCache, whereSql, orderBySql string, whereArgs ...interface{}) ([]T, error) {
+	var results []T
+	db := Use(model.DatabaseName())
+	if cache != nil && cache.CacheName != "" {
+		db = db.Cache(cache.CacheName, cache.CacheTTL)
+	}
+	err := db.Table(model.TableName()).OnlyTrashed().Where(whereSql, whereArgs...).OrderBy(orderBySql).FindToDbModel(&results)
+	return results, err
 }

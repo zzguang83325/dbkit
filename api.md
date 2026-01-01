@@ -6,8 +6,12 @@
 
 - [数据库初始化](#数据库初始化)
 - [查询操作](#查询操作)
+- [查询超时控制](#查询超时控制)
 - [插入与更新](#插入与更新)
 - [删除操作](#删除操作)
+- [软删除](#软删除)
+- [自动时间戳](#自动时间戳)
+- [乐观锁](#乐观锁)
 - [事务处理](#事务处理)
 - [Record 对象](#record-对象)
 - [链式查询](#链式查询)
@@ -50,6 +54,7 @@ type Config struct {
     MaxOpen         int           // 最大打开连接数
     MaxIdle         int           // 最大空闲连接数
     ConnMaxLifetime time.Duration // 连接最大生命周期
+    QueryTimeout    time.Duration // 默认查询超时时间（0表示不限制）
 }
 ```
 
@@ -192,6 +197,88 @@ type Page[T any] struct {
 
 ---
 
+## 查询超时控制
+
+DBKit 支持全局和单次查询超时设置，使用 Go 标准库的 `context.Context` 实现。
+
+### 全局超时配置
+在 Config 中设置 `QueryTimeout` 字段：
+```go
+config := &dbkit.Config{
+    Driver:       dbkit.MySQL,
+    DSN:          "root:password@tcp(localhost:3306)/test",
+    MaxOpen:      10,
+    QueryTimeout: 30 * time.Second,  // 所有查询默认30秒超时
+}
+dbkit.OpenDatabaseWithConfig(config)
+```
+
+### Timeout (全局函数)
+```go
+func Timeout(d time.Duration) *DB
+```
+返回带有指定超时时间的 DB 实例。
+
+**示例:**
+```go
+users, err := dbkit.Timeout(5 * time.Second).Query("SELECT * FROM users")
+```
+
+### DB.Timeout
+```go
+func (db *DB) Timeout(d time.Duration) *DB
+```
+为 DB 实例设置查询超时时间。
+
+**示例:**
+```go
+users, err := dbkit.Use("default").Timeout(5 * time.Second).Query("SELECT * FROM users")
+```
+
+### Tx.Timeout
+```go
+func (tx *Tx) Timeout(d time.Duration) *Tx
+```
+为事务设置查询超时时间。
+
+**示例:**
+```go
+dbkit.Transaction(func(tx *dbkit.Tx) error {
+    _, err := tx.Timeout(5 * time.Second).Query("SELECT * FROM orders")
+    return err
+})
+```
+
+### QueryBuilder.Timeout
+```go
+func (qb *QueryBuilder) Timeout(d time.Duration) *QueryBuilder
+```
+为链式查询设置超时时间。
+
+**示例:**
+```go
+users, err := dbkit.Table("users").
+    Where("age > ?", 18).
+    Timeout(10 * time.Second).
+    Find()
+```
+
+### 超时错误处理
+超时后返回 `context.DeadlineExceeded` 错误：
+```go
+import "context"
+import "errors"
+
+users, err := dbkit.Timeout(1 * time.Second).Query("SELECT SLEEP(5)")
+if err != nil {
+    if errors.Is(err, context.DeadlineExceeded) {
+        fmt.Println("查询超时")
+    }
+}
+```
+
+---
+
 ## 插入与更新
 
 ### Exec
@@ -266,7 +353,7 @@ func Delete(table string, whereSql string, whereArgs ...interface{}) (int64, err
 func (db *DB) Delete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
 func (tx *Tx) Delete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
 ```
-根据条件删除记录。
+根据条件删除记录。如果表配置了软删除，则执行软删除（更新删除标记字段）。
 
 ### DeleteRecord
 ```go
@@ -275,6 +362,486 @@ func (db *DB) DeleteRecord(table string, record *Record) (int64, error)
 func (tx *Tx) DeleteRecord(table string, record *Record) (int64, error)
 ```
 根据 Record 中的主键删除记录。
+
+---
+
+## 软删除
+
+软删除允许删除记录时只标记为已删除而非物理删除，便于数据恢复和审计。
+
+### 软删除类型
+```go
+const (
+    SoftDeleteTimestamp SoftDeleteType = iota  // 时间戳类型 (deleted_at)
+    SoftDeleteBool                              // 布尔类型 (is_deleted)
+)
+```
+
+### ConfigSoftDelete
+```go
+func ConfigSoftDelete(table, field string)
+func (db *DB) ConfigSoftDelete(table, field string) *DB
+```
+为表配置软删除（时间戳类型）。
+
+**参数:**
+- `table`: 表名
+- `field`: 软删除字段名（如 "deleted_at"）
+
+**示例:**
+```go
+// 配置软删除
+dbkit.ConfigSoftDelete("users", "deleted_at")
+
+// 多数据库模式
+dbkit.Use("main").ConfigSoftDelete("users", "deleted_at")
+```
+
+### ConfigSoftDeleteWithType
+```go
+func ConfigSoftDeleteWithType(table, field string, deleteType SoftDeleteType)
+func (db *DB) ConfigSoftDeleteWithType(table, field string, deleteType SoftDeleteType) *DB
+```
+为表配置软删除（指定类型）。
+
+**示例:**
+```go
+// 使用布尔类型
+dbkit.ConfigSoftDeleteWithType("posts", "is_deleted", dbkit.SoftDeleteBool)
+```
+
+### RemoveSoftDelete
+```go
+func RemoveSoftDelete(table string)
+func (db *DB) RemoveSoftDelete(table string) *DB
+```
+移除表的软删除配置。
+
+### HasSoftDelete
+```go
+func HasSoftDelete(table string) bool
+func (db *DB) HasSoftDelete(table string) bool
+```
+检查表是否启用软删除。
+
+### WithTrashed
+```go
+func (qb *QueryBuilder) WithTrashed() *QueryBuilder
+```
+查询时包含已删除的记录。
+
+**示例:**
+```go
+// 查询所有用户（包括已删除）
+users, err := dbkit.Table("users").WithTrashed().Find()
+```
+
+### OnlyTrashed
+```go
+func (qb *QueryBuilder) OnlyTrashed() *QueryBuilder
+```
+只查询已删除的记录。
+
+**示例:**
+```go
+// 只查询已删除的用户
+deletedUsers, err := dbkit.Table("users").OnlyTrashed().Find()
+```
+
+### ForceDelete
+```go
+func ForceDelete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (db *DB) ForceDelete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (tx *Tx) ForceDelete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (qb *QueryBuilder) ForceDelete() (int64, error)
+```
+物理删除记录，绕过软删除配置。
+
+**示例:**
+```go
+// 物理删除
+dbkit.ForceDelete("users", "id = ?", 1)
+
+// 链式调用
+dbkit.Table("users").Where("id = ?", 1).ForceDelete()
+```
+
+### Restore
+```go
+func Restore(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (db *DB) Restore(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (tx *Tx) Restore(table string, whereSql string, whereArgs ...interface{}) (int64, error)
+func (qb *QueryBuilder) Restore() (int64, error)
+```
+恢复已软删除的记录。
+
+**示例:**
+```go
+// 恢复记录
+dbkit.Restore("users", "id = ?", 1)
+
+// 链式调用
+dbkit.Table("users").Where("id = ?", 1).Restore()
+```
+
+### 软删除完整示例
+```go
+// 1. 配置软删除
+dbkit.ConfigSoftDelete("users", "deleted_at")
+
+// 2. 插入数据
+record := dbkit.NewRecord()
+record.Set("name", "John")
+dbkit.Insert("users", record)
+
+// 3. 软删除（自动更新 deleted_at 字段）
+dbkit.Delete("users", "id = ?", 1)
+
+// 4. 普通查询（自动过滤已删除记录）
+users, _ := dbkit.Table("users").Find()  // 不包含已删除
+
+// 5. 查询包含已删除记录
+allUsers, _ := dbkit.Table("users").WithTrashed().Find()
+
+// 6. 只查询已删除记录
+deletedUsers, _ := dbkit.Table("users").OnlyTrashed().Find()
+
+// 7. 恢复已删除记录
+dbkit.Restore("users", "id = ?", 1)
+
+// 8. 物理删除（真正删除数据）
+dbkit.ForceDelete("users", "id = ?", 1)
+```
+
+### DbModel 软删除方法
+
+生成的 DbModel 自动包含软删除相关方法：
+
+```go
+// 软删除（如果配置了软删除）
+user.Delete()
+
+// 物理删除
+user.ForceDelete()
+
+// 恢复
+user.Restore()
+
+// 查询包含已删除
+users, _ := user.FindWithTrashed("status = ?", "id DESC", "active")
+
+// 只查询已删除
+deletedUsers, _ := user.FindOnlyTrashed("", "id DESC")
+```
+
+---
+
+## 自动时间戳
+
+自动时间戳功能允许在插入和更新记录时自动填充时间戳字段，无需手动设置。
+
+### ConfigTimestamps
+```go
+func ConfigTimestamps(table string)
+func (db *DB) ConfigTimestamps(table string) *DB
+```
+为表配置自动时间戳，使用默认字段名 `created_at` 和 `updated_at`。
+
+**示例:**
+```go
+// 配置自动时间戳
+dbkit.ConfigTimestamps("users")
+
+// 多数据库模式
+dbkit.Use("main").ConfigTimestamps("users")
+```
+
+### ConfigTimestampsWithFields
+```go
+func ConfigTimestampsWithFields(table, createdAtField, updatedAtField string)
+func (db *DB) ConfigTimestampsWithFields(table, createdAtField, updatedAtField string) *DB
+```
+为表配置自动时间戳，使用自定义字段名。
+
+**参数:**
+- `table`: 表名
+- `createdAtField`: 创建时间字段名（如 "create_time"）
+- `updatedAtField`: 更新时间字段名（如 "update_time"）
+
+**示例:**
+```go
+// 使用自定义字段名
+dbkit.ConfigTimestampsWithFields("orders", "create_time", "update_time")
+```
+
+### ConfigCreatedAt
+```go
+func ConfigCreatedAt(table, field string)
+func (db *DB) ConfigCreatedAt(table, field string) *DB
+```
+仅配置 created_at 字段。
+
+**示例:**
+```go
+// 仅配置创建时间（适用于日志表等只需记录创建时间的场景）
+dbkit.ConfigCreatedAt("logs", "log_time")
+```
+
+### ConfigUpdatedAt
+```go
+func ConfigUpdatedAt(table, field string)
+func (db *DB) ConfigUpdatedAt(table, field string) *DB
+```
+仅配置 updated_at 字段。
+
+**示例:**
+```go
+// 仅配置更新时间
+dbkit.ConfigUpdatedAt("cache_data", "last_modified")
+```
+
+### RemoveTimestamps
+```go
+func RemoveTimestamps(table string)
+func (db *DB) RemoveTimestamps(table string) *DB
+```
+移除表的时间戳配置。
+
+### HasTimestamps
+```go
+func HasTimestamps(table string) bool
+func (db *DB) HasTimestamps(table string) bool
+```
+检查表是否配置了自动时间戳。
+
+### WithoutTimestamps
+```go
+func (qb *QueryBuilder) WithoutTimestamps() *QueryBuilder
+```
+临时禁用自动时间戳（用于 QueryBuilder 的 Update 操作）。
+
+**示例:**
+```go
+// 更新时不自动填充 updated_at
+dbkit.Table("users").Where("id = ?", 1).WithoutTimestamps().Update(record)
+```
+
+### 自动时间戳行为说明
+
+- **Insert 操作**: 如果 `created_at` 字段未设置，自动填充当前时间
+- **Update 操作**: 总是自动填充 `updated_at` 字段为当前时间
+- **手动设置优先**: 如果 Record 中已设置 `created_at`，不会被覆盖
+
+### 自动时间戳完整示例
+```go
+// 1. 配置自动时间戳
+dbkit.ConfigTimestamps("users")
+
+// 2. 插入数据（created_at 自动填充）
+record := dbkit.NewRecord()
+record.Set("name", "John")
+record.Set("email", "john@example.com")
+dbkit.Insert("users", record)
+// created_at 自动设置为当前时间
+
+// 3. 更新数据（updated_at 自动填充）
+updateRecord := dbkit.NewRecord()
+updateRecord.Set("name", "John Updated")
+dbkit.Update("users", updateRecord, "id = ?", 1)
+// updated_at 自动设置为当前时间
+
+// 4. 插入时手动指定 created_at（不会被覆盖）
+customTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+record2 := dbkit.NewRecord()
+record2.Set("name", "Jane")
+record2.Set("created_at", customTime)
+dbkit.Insert("users", record2)
+// created_at 保持为 2020-01-01
+
+// 5. 临时禁用自动时间戳
+dbkit.Table("users").Where("id = ?", 1).WithoutTimestamps().Update(record)
+// updated_at 不会被自动更新
+
+// 6. 使用自定义字段名
+dbkit.ConfigTimestampsWithFields("orders", "create_time", "update_time")
+
+// 7. 仅配置 created_at（适用于日志表）
+dbkit.ConfigCreatedAt("logs", "log_time")
+```
+
+### 与软删除配合使用
+
+自动时间戳与软删除功能相互独立，可以同时使用：
+
+```go
+// 同时配置软删除和自动时间戳
+dbkit.ConfigTimestamps("users")
+dbkit.ConfigSoftDelete("users", "deleted_at")
+
+// 软删除时，updated_at 也会自动更新
+dbkit.Delete("users", "id = ?", 1)
+// deleted_at 设置为当前时间，updated_at 也更新
+```
+
+---
+
+## 乐观锁
+
+乐观锁是一种并发控制机制，通过版本号字段检测并发更新冲突，防止数据被意外覆盖。
+
+### 工作原理
+
+1. **Insert**: 自动将版本字段初始化为 1
+2. **Update**: 自动在 WHERE 条件中添加版本检查，并在 SET 中递增版本号
+3. **冲突检测**: 如果更新影响 0 行（版本不匹配），返回 `ErrVersionMismatch` 错误
+
+### ErrVersionMismatch
+```go
+var ErrVersionMismatch = fmt.Errorf("dbkit: optimistic lock conflict - record was modified by another transaction")
+```
+版本冲突时返回的错误。
+
+### ConfigOptimisticLock
+```go
+func ConfigOptimisticLock(table string)
+func (db *DB) ConfigOptimisticLock(table string) *DB
+```
+为表配置乐观锁，使用默认字段名 `version`。
+
+**示例:**
+```go
+// 配置乐观锁
+dbkit.ConfigOptimisticLock("products")
+
+// 多数据库模式
+dbkit.Use("main").ConfigOptimisticLock("products")
+```
+
+### ConfigOptimisticLockWithField
+```go
+func ConfigOptimisticLockWithField(table, versionField string)
+func (db *DB) ConfigOptimisticLockWithField(table, versionField string) *DB
+```
+为表配置乐观锁，使用自定义版本字段名。
+
+**示例:**
+```go
+// 使用自定义字段名
+dbkit.ConfigOptimisticLockWithField("orders", "revision")
+```
+
+### RemoveOptimisticLock
+```go
+func RemoveOptimisticLock(table string)
+func (db *DB) RemoveOptimisticLock(table string) *DB
+```
+移除表的乐观锁配置。
+
+### HasOptimisticLock
+```go
+func HasOptimisticLock(table string) bool
+func (db *DB) HasOptimisticLock(table string) bool
+```
+检查表是否配置了乐观锁。
+
+### 版本字段处理规则
+
+| version 字段值 | 行为 |
+|---------------|------|
+| 不存在 | 跳过版本检查，正常更新 |
+| `nil` / `NULL` | 跳过版本检查，正常更新 |
+| `""` (空字符串) | 跳过版本检查，正常更新 |
+| `0`, `1`, `2`, ... | 进行版本检查 |
+| `"123"` (数字字符串) | 进行版本检查（解析为数字） |
+
+### 乐观锁完整示例
+
+```go
+// 1. 配置乐观锁
+dbkit.ConfigOptimisticLock("products")
+
+// 2. 插入数据（version 自动初始化为 1）
+record := dbkit.NewRecord()
+record.Set("name", "Laptop")
+record.Set("price", 999.99)
+dbkit.Insert("products", record)
+// version 自动设置为 1
+
+// 3. 正常更新（带版本号）
+updateRecord := dbkit.NewRecord()
+updateRecord.Set("version", int64(1))  // 当前版本
+updateRecord.Set("price", 899.99)
+rows, err := dbkit.Update("products", updateRecord, "id = ?", 1)
+// 成功：version 自动递增为 2
+
+// 4. 并发冲突检测（使用过期版本）
+staleRecord := dbkit.NewRecord()
+staleRecord.Set("version", int64(1))  // 过期版本！
+staleRecord.Set("price", 799.99)
+rows, err = dbkit.Update("products", staleRecord, "id = ?", 1)
+if errors.Is(err, dbkit.ErrVersionMismatch) {
+    fmt.Println("检测到并发冲突，记录已被其他事务修改")
+}
+
+// 5. 正确处理并发：先读取最新版本
+latestRecord, _ := dbkit.Table("products").Where("id = ?", 1).FindFirst()
+currentVersion := latestRecord.GetInt("version")
+
+updateRecord2 := dbkit.NewRecord()
+updateRecord2.Set("version", currentVersion)
+updateRecord2.Set("price", 799.99)
+dbkit.Update("products", updateRecord2, "id = ?", 1)
+
+// 6. 不带版本字段更新（跳过版本检查）
+noVersionRecord := dbkit.NewRecord()
+noVersionRecord.Set("stock", 90)  // 没有设置 version
+dbkit.Update("products", noVersionRecord, "id = ?", 1)
+// 正常更新，不检查版本
+
+// 7. 使用 UpdateRecord（自动从记录中提取版本）
+product, _ := dbkit.Table("products").Where("id = ?", 1).FindFirst()
+product.Set("name", "Gaming Laptop")
+dbkit.Use("default").UpdateRecord("products", product)
+// version 已在 product 中，自动进行版本检查
+
+// 8. 事务中使用乐观锁
+dbkit.Transaction(func(tx *dbkit.Tx) error {
+    rec, _ := tx.Table("products").Where("id = ?", 1).FindFirst()
+    currentVersion := rec.GetInt("version")
+    
+    updateRec := dbkit.NewRecord()
+    updateRec.Set("version", currentVersion)
+    updateRec.Set("stock", 80)
+    _, err := tx.Update("products", updateRec, "id = ?", 1)
+    return err  // 版本冲突时自动回滚
+})
+```
+
+### 与其他功能配合使用
+
+乐观锁可以与自动时间戳、软删除同时使用：
+
+```go
+// 同时配置多个功能
+dbkit.ConfigOptimisticLock("products")
+dbkit.ConfigTimestamps("products")
+dbkit.ConfigSoftDelete("products", "deleted_at")
+
+// Insert: version=1, created_at=now
+// Update: version++, updated_at=now
+// Delete: deleted_at=now, updated_at=now
+```
+
+### IOptimisticLockModel 接口
+
+```go
+type IOptimisticLockModel interface {
+    IDbModel
+    VersionField() string  // 返回版本字段名，空字符串表示不使用
+}
+```
+
+生成的 DbModel 可以实现此接口来自动配置乐观锁。
 
 ---
 
@@ -451,6 +1018,284 @@ users, err := dbkit.Table("users").
     Where("status = ?", "active").
     OrderBy("created_at DESC").
     Limit(10).
+    Find()
+```
+
+### Join 查询
+
+支持多种 JOIN 类型的链式调用：
+
+```go
+func (b *QueryBuilder) Join(table, condition string, args ...interface{}) *QueryBuilder      // JOIN
+func (b *QueryBuilder) LeftJoin(table, condition string, args ...interface{}) *QueryBuilder  // LEFT JOIN
+func (b *QueryBuilder) RightJoin(table, condition string, args ...interface{}) *QueryBuilder // RIGHT JOIN
+func (b *QueryBuilder) InnerJoin(table, condition string, args ...interface{}) *QueryBuilder // INNER JOIN
+```
+
+**示例:**
+```go
+// 简单 JOIN
+records, err := dbkit.Table("users").
+    Select("users.name, orders.total").
+    LeftJoin("orders", "users.id = orders.user_id").
+    Where("orders.status = ?", "completed").
+    Find()
+
+// 多表 JOIN
+records, err := dbkit.Table("orders").
+    Select("orders.id, users.name, products.name as product_name").
+    InnerJoin("users", "orders.user_id = users.id").
+    InnerJoin("order_items", "orders.id = order_items.order_id").
+    InnerJoin("products", "order_items.product_id = products.id").
+    Where("orders.status = ?", "completed").
+    OrderBy("orders.created_at DESC").
+    Find()
+
+// 带参数的 JOIN 条件
+records, err := dbkit.Table("users").
+    Join("orders", "users.id = orders.user_id AND orders.status = ?", "active").
+    Find()
+```
+
+### 子查询 (Subquery)
+
+#### NewSubquery
+```go
+func NewSubquery() *Subquery
+```
+创建新的子查询构建器。
+
+#### Subquery 方法
+```go
+func (s *Subquery) Table(name string) *Subquery                           // 设置表名
+func (s *Subquery) Select(columns string) *Subquery                       // 设置查询字段
+func (s *Subquery) Where(condition string, args ...interface{}) *Subquery // 添加条件
+func (s *Subquery) OrderBy(orderBy string) *Subquery                      // 排序
+func (s *Subquery) Limit(limit int) *Subquery                             // 限制数量
+func (s *Subquery) ToSQL() (string, []interface{})                        // 生成 SQL
+```
+
+#### WHERE IN 子查询
+```go
+func (b *QueryBuilder) WhereIn(column string, sub *Subquery) *QueryBuilder    // WHERE column IN (subquery)
+func (b *QueryBuilder) WhereNotIn(column string, sub *Subquery) *QueryBuilder // WHERE column NOT IN (subquery)
+```
+
+**示例:**
+```go
+// 查询有订单的用户
+activeUsersSub := dbkit.NewSubquery().
+    Table("orders").
+    Select("DISTINCT user_id").
+    Where("status = ?", "completed")
+
+users, err := dbkit.Table("users").
+    Select("*").
+    WhereIn("id", activeUsersSub).
+    Find()
+
+// 查询没有被禁用的用户的订单
+bannedUsersSub := dbkit.NewSubquery().
+    Table("users").
+    Select("id").
+    Where("status = ?", "banned")
+
+orders, err := dbkit.Table("orders").
+    WhereNotIn("user_id", bannedUsersSub).
+    Find()
+```
+
+#### FROM 子查询
+```go
+func (b *QueryBuilder) TableSubquery(sub *Subquery, alias string) *QueryBuilder
+```
+使用子查询作为 FROM 数据源（派生表）。
+
+**示例:**
+```go
+// 从聚合子查询中查询
+userTotalsSub := dbkit.NewSubquery().
+    Table("orders").
+    Select("user_id, SUM(total) as total_spent")
+
+records, err := (&dbkit.QueryBuilder{}).
+    TableSubquery(userTotalsSub, "user_totals").
+    Select("user_id, total_spent").
+    Where("total_spent > ?", 1000).
+    Find()
+```
+
+#### SELECT 子查询
+```go
+func (b *QueryBuilder) SelectSubquery(sub *Subquery, alias string) *QueryBuilder
+```
+在 SELECT 子句中添加子查询作为字段。
+
+**示例:**
+```go
+// 为每个用户添加订单数量字段
+orderCountSub := dbkit.NewSubquery().
+    Table("orders").
+    Select("COUNT(*)").
+    Where("orders.user_id = users.id")
+
+users, err := dbkit.Table("users").
+    Select("users.id, users.name").
+    SelectSubquery(orderCountSub, "order_count").
+    Find()
+```
+
+### 高级 WHERE 条件
+
+#### OrWhere
+```go
+func (b *QueryBuilder) OrWhere(condition string, args ...interface{}) *QueryBuilder
+```
+添加 OR 条件到查询。当与 Where 组合使用时，AND 条件会被括号包裹以保持正确的优先级。
+
+**示例:**
+```go
+// 查询状态为 active 或 priority 为 high 的订单
+orders, err := dbkit.Table("orders").
+    Where("status = ?", "active").
+    OrWhere("priority = ?", "high").
+    Find()
+// 生成: WHERE (status = ?) OR priority = ?
+
+// 多个 OR 条件
+orders, err := dbkit.Table("orders").
+    OrWhere("status = ?", "pending").
+    OrWhere("status = ?", "processing").
+    OrWhere("status = ?", "shipped").
+    Find()
+// 生成: WHERE status = ? OR status = ? OR status = ?
+```
+
+#### WhereInValues / WhereNotInValues
+```go
+func (b *QueryBuilder) WhereInValues(column string, values []interface{}) *QueryBuilder
+func (b *QueryBuilder) WhereNotInValues(column string, values []interface{}) *QueryBuilder
+```
+使用值列表进行 IN/NOT IN 查询（与子查询版本 WhereIn/WhereNotIn 区分）。
+
+**示例:**
+```go
+// 查询指定 ID 的用户
+users, err := dbkit.Table("users").
+    WhereInValues("id", []interface{}{1, 2, 3, 4, 5}).
+    Find()
+// 生成: WHERE id IN (?, ?, ?, ?, ?)
+
+// 排除指定状态的订单
+orders, err := dbkit.Table("orders").
+    WhereNotInValues("status", []interface{}{"cancelled", "refunded"}).
+    Find()
+// 生成: WHERE status NOT IN (?, ?)
+```
+
+#### WhereBetween / WhereNotBetween
+```go
+func (b *QueryBuilder) WhereBetween(column string, min, max interface{}) *QueryBuilder
+func (b *QueryBuilder) WhereNotBetween(column string, min, max interface{}) *QueryBuilder
+```
+范围查询。
+
+**示例:**
+```go
+// 查询年龄在 18-65 之间的用户
+users, err := dbkit.Table("users").
+    WhereBetween("age", 18, 65).
+    Find()
+// 生成: WHERE age BETWEEN ? AND ?
+
+// 查询价格不在 100-500 之间的产品
+products, err := dbkit.Table("products").
+    WhereNotBetween("price", 100, 500).
+    Find()
+// 生成: WHERE price NOT BETWEEN ? AND ?
+
+// 日期范围查询
+orders, err := dbkit.Table("orders").
+    WhereBetween("created_at", "2024-01-01", "2024-12-31").
+    Find()
+```
+
+#### WhereNull / WhereNotNull
+```go
+func (b *QueryBuilder) WhereNull(column string) *QueryBuilder
+func (b *QueryBuilder) WhereNotNull(column string) *QueryBuilder
+```
+NULL 值检查。
+
+**示例:**
+```go
+// 查询没有邮箱的用户
+users, err := dbkit.Table("users").
+    WhereNull("email").
+    Find()
+// 生成: WHERE email IS NULL
+
+// 查询有手机号的用户
+users, err := dbkit.Table("users").
+    WhereNotNull("phone").
+    Find()
+// 生成: WHERE phone IS NOT NULL
+```
+
+### 分组和聚合
+
+#### GroupBy
+```go
+func (b *QueryBuilder) GroupBy(columns string) *QueryBuilder
+```
+添加 GROUP BY 子句。
+
+#### Having
+```go
+func (b *QueryBuilder) Having(condition string, args ...interface{}) *QueryBuilder
+```
+添加 HAVING 子句，用于过滤分组结果。
+
+**示例:**
+```go
+// 按状态分组统计订单
+stats, err := dbkit.Table("orders").
+    Select("status, COUNT(*) as count, SUM(total) as total_amount").
+    GroupBy("status").
+    Find()
+
+// 查询订单数大于 5 的用户
+users, err := dbkit.Table("orders").
+    Select("user_id, COUNT(*) as order_count").
+    GroupBy("user_id").
+    Having("COUNT(*) > ?", 5).
+    Find()
+
+// 多个 HAVING 条件
+stats, err := dbkit.Table("orders").
+    Select("user_id, COUNT(*) as cnt, SUM(total) as total").
+    GroupBy("user_id").
+    Having("COUNT(*) > ?", 3).
+    Having("SUM(total) > ?", 1000).
+    Find()
+// 生成: HAVING COUNT(*) > ? AND SUM(total) > ?
+```
+
+### 复杂查询示例
+
+```go
+// 组合多种条件的复杂查询
+results, err := dbkit.Table("orders").
+    Select("status, COUNT(*) as cnt, SUM(total) as total_amount").
+    Where("created_at > ?", "2024-01-01").
+    Where("active = ?", 1).
+    OrWhere("priority = ?", "high").
+    WhereInValues("type", []interface{}{"A", "B", "C"}).
+    WhereNotNull("customer_id").
+    GroupBy("status").
+    Having("COUNT(*) > ?", 10).
+    OrderBy("total_amount DESC").
+    Limit(20).
     Find()
 ```
 

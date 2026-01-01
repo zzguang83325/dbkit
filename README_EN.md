@@ -19,6 +19,9 @@ DBKit is a high-performance, lightweight database operation library for Go, insp
 - **Logging**: Built-in SQL logging with easy integration for various logging systems
 - **Cache Support**: Built-in two-level cache supporting local memory and Redis cache with chain query caching
 - **Connection Pool Management**: Built-in connection pool management for improved performance
+- **Query Timeout Control**: Global and per-query timeout settings to prevent slow queries from blocking
+- **Soft Delete Support**: Configurable soft delete fields, automatic filtering of deleted records, restore and force delete functions
+- **Optimistic Lock Support**: Configurable version fields, automatic concurrent conflict detection, prevents data overwriting
 
 ## Installation
 
@@ -275,6 +278,95 @@ page, err := dbkit.Table("users").
     Paginate(1, 10)
 ```
 
+##### Advanced WHERE Conditions
+
+```go
+// OrWhere - OR conditions
+orders, err := dbkit.Table("orders").
+    Where("status = ?", "active").
+    OrWhere("priority = ?", "high").
+    Find()
+// Generates: WHERE (status = ?) OR priority = ?
+
+// WhereInValues - IN query with value list
+users, err := dbkit.Table("users").
+    WhereInValues("id", []interface{}{1, 2, 3, 4, 5}).
+    Find()
+// Generates: WHERE id IN (?, ?, ?, ?, ?)
+
+// WhereNotInValues - NOT IN query
+orders, err := dbkit.Table("orders").
+    WhereNotInValues("status", []interface{}{"cancelled", "refunded"}).
+    Find()
+
+// WhereBetween - Range query
+users, err := dbkit.Table("users").
+    WhereBetween("age", 18, 65).
+    Find()
+// Generates: WHERE age BETWEEN ? AND ?
+
+// WhereNull / WhereNotNull - NULL checks
+users, err := dbkit.Table("users").
+    WhereNull("deleted_at").
+    WhereNotNull("email").
+    Find()
+// Generates: WHERE deleted_at IS NULL AND email IS NOT NULL
+```
+
+##### Grouping and Aggregation
+
+```go
+// GroupBy + Having
+stats, err := dbkit.Table("orders").
+    Select("user_id, COUNT(*) as order_count, SUM(total) as total_amount").
+    GroupBy("user_id").
+    Having("COUNT(*) > ?", 5).
+    Find()
+// Generates: SELECT ... GROUP BY user_id HAVING COUNT(*) > ?
+```
+
+##### Complex Query Example
+
+```go
+results, err := dbkit.Table("orders").
+    Select("status, COUNT(*) as cnt, SUM(total) as total_amount").
+    Where("created_at > ?", "2024-01-01").
+    Where("active = ?", 1).
+    OrWhere("priority = ?", "high").
+    WhereInValues("type", []interface{}{"A", "B", "C"}).
+    WhereNotNull("customer_id").
+    GroupBy("status").
+    Having("COUNT(*) > ?", 10).
+    OrderBy("total_amount DESC").
+    Limit(20).
+    Find()
+```
+
+##### Supported Methods
+
+| Method | Description |
+|--------|-------------|
+| `Table(name)` | Specify table name |
+| `Select(columns)` | Specify columns, default `*` |
+| `Where(condition, args...)` | Add WHERE condition, multiple calls use `AND` |
+| `And(condition, args...)` | Alias for `Where` |
+| `OrWhere(condition, args...)` | Add OR condition |
+| `WhereInValues(column, values)` | IN query with value list |
+| `WhereNotInValues(column, values)` | NOT IN query with value list |
+| `WhereBetween(column, min, max)` | BETWEEN range query |
+| `WhereNotBetween(column, min, max)` | NOT BETWEEN range query |
+| `WhereNull(column)` | IS NULL check |
+| `WhereNotNull(column)` | IS NOT NULL check |
+| `GroupBy(columns)` | GROUP BY clause |
+| `Having(condition, args...)` | HAVING clause for filtering groups |
+| `OrderBy(orderBy)` | Specify sort order |
+| `Limit(limit)` | Limit number of records |
+| `Offset(offset)` | Specify offset |
+| `Find() / Query()` | Execute query and return results |
+| `FindFirst() / QueryFirst()` | Execute query and return first record |
+| `Delete()` | Delete with conditions (requires `Where`) |
+| `Paginate(page, pageSize)` | Execute pagination query |
+
 ### 3. Insert & Update
 
 ```go
@@ -339,7 +431,69 @@ dbkit.CacheDelete("my_store", "key1")
 dbkit.CacheClear("my_store")
 ```
 
-### 6. Logging Configuration
+### 6. Soft Delete
+
+```go
+// Configure soft delete
+dbkit.ConfigSoftDelete("users", "deleted_at")
+
+// Soft delete
+dbkit.Delete("users", "id = ?", 1)
+
+// Query (auto filters deleted)
+users, _ := dbkit.Table("users").Find()
+
+// Query including deleted
+allUsers, _ := dbkit.Table("users").WithTrashed().Find()
+
+// Restore
+dbkit.Restore("users", "id = ?", 1)
+
+// Force delete
+dbkit.ForceDelete("users", "id = ?", 1)
+```
+
+### 7. Optimistic Lock
+
+Optimistic lock detects concurrent update conflicts through version fields, preventing data from being accidentally overwritten.
+
+```go
+// Configure optimistic lock (default field: version)
+dbkit.ConfigOptimisticLock("products")
+
+// Custom field name
+dbkit.ConfigOptimisticLockWithField("orders", "revision")
+
+// Insert (version auto-initialized to 1)
+record := dbkit.NewRecord().Set("name", "Laptop").Set("price", 999.99)
+dbkit.Insert("products", record)
+
+// Update with version
+updateRecord := dbkit.NewRecord()
+updateRecord.Set("version", int64(1))  // current version
+updateRecord.Set("price", 899.99)
+rows, err := dbkit.Update("products", updateRecord, "id = ?", 1)
+// Success: version auto-incremented to 2
+
+// Concurrent conflict detection (stale version)
+staleRecord := dbkit.NewRecord()
+staleRecord.Set("version", int64(1))  // stale version!
+staleRecord.Set("price", 799.99)
+rows, err = dbkit.Update("products", staleRecord, "id = ?", 1)
+if errors.Is(err, dbkit.ErrVersionMismatch) {
+    fmt.Println("Concurrent conflict detected")
+}
+
+// Correct way: read latest version first
+latestRecord, _ := dbkit.Table("products").Where("id = ?", 1).FindFirst()
+currentVersion := latestRecord.GetInt("version")
+updateRecord2 := dbkit.NewRecord()
+updateRecord2.Set("version", currentVersion)
+updateRecord2.Set("price", 799.99)
+dbkit.Update("products", updateRecord2, "id = ?", 1)
+```
+
+### 8. Logging Configuration
 
 ```go
 // Enable debug mode
@@ -353,7 +507,7 @@ dbkit.InitLoggerWithFile("debug", logFile)
 dbkit.SetLogger(myCustomLogger)
 ```
 
-### 7. Connection Pool Configuration
+### 9. Connection Pool Configuration
 
 ```go
 config := &dbkit.Config{

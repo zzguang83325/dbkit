@@ -1,7 +1,9 @@
+.*/
 **/*.log
 **/*.db
 .idea
 .vscode
 *.exe
+*_test.*
 tests/
 exclude/

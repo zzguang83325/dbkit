@@ -59,6 +59,16 @@ func (m *Demo) Delete() (int64, error) {
 	return dbkit.DeleteDbModel(m)
 }
 
+// ForceDelete performs a physical delete, bypassing soft delete
+func (m *Demo) ForceDelete() (int64, error) {
+	return dbkit.ForceDeleteModel(m)
+}
+
+// Restore restores a soft-deleted record
+func (m *Demo) Restore() (int64, error) {
+	return dbkit.RestoreModel(m)
+}
+
 // FindFirst finds the first Demo record based on conditions
 func (m *Demo) FindFirst(whereSql string, args ...interface{}) (*Demo, error) {
 	result := &Demo{}
@@ -68,6 +78,16 @@ func (m *Demo) FindFirst(whereSql string, args ...interface{}) (*Demo, error) {
 // Find finds Demo records based on conditions
 func (m *Demo) Find(whereSql string, orderBySql string, args ...interface{}) ([]*Demo, error) {
 	return dbkit.FindModel[*Demo](m, m.GetCache(), whereSql, orderBySql, args...)
+}
+
+// FindWithTrashed finds Demo records including soft-deleted ones
+func (m *Demo) FindWithTrashed(whereSql string, orderBySql string, args ...interface{}) ([]*Demo, error) {
+	return dbkit.FindModelWithTrashed[*Demo](m, m.GetCache(), whereSql, orderBySql, args...)
+}
+
+// FindOnlyTrashed finds only soft-deleted Demo records
+func (m *Demo) FindOnlyTrashed(whereSql string, orderBySql string, args ...interface{}) ([]*Demo, error) {
+	return dbkit.FindModelOnlyTrashed[*Demo](m, m.GetCache(), whereSql, orderBySql, args...)
 }
 
 // Paginate paginates Demo records based on conditions
