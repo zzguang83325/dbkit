@@ -85,7 +85,7 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("package %s\n\n", pkgName))
 
-	// 检查是否需要导入 time 或 dbkit
+	// 检查是否需要导入 time
 	hasTime := false
 	for _, col := range columns {
 		if strings.Contains(dbTypeToGoType(col.Type, col.Nullable), "time.Time") {
@@ -94,23 +94,20 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 		}
 	}
 
-	if hasTime || pkgName != "dbkit" {
-		sb.WriteString("import (\n")
+	// 生成 import
+	sb.WriteString("import (\n")
+	if hasTime {
 		sb.WriteString("\t\"time\"\n")
-		// 始终导入 dbkit 以支持 ToJson 和 IDbModel
-		if pkgName != "dbkit" {
-			// 这里假设用户已经安装了 dbkit
-			// 如果是在项目内部生成，可能需要相对路径或模块路径
-			// 但通常生成的代码会放在一个单独的包中，引用主包
-			sb.WriteString("\t\"github.com/zzguang83325/dbkit\"\n")
-		}
-		sb.WriteString(")\n\n")
 	}
+	if pkgName != "dbkit" {
+		sb.WriteString("\t\"github.com/zzguang83325/dbkit\"\n")
+	}
+	sb.WriteString(")\n\n")
 
 	sb.WriteString(fmt.Sprintf("// %s represents the %s table\n", finalStructName, tablename))
 	sb.WriteString(fmt.Sprintf("type %s struct {\n", finalStructName))
-	sb.WriteString("\tcacheName string\n")
-	sb.WriteString("\tcacheTTL  time.Duration\n")
+	// 嵌入 ModelCache 以支持缓存功能
+	sb.WriteString("\tdbkit.ModelCache\n")
 
 	for _, col := range columns {
 		fieldName := SnakeToCamel(col.Name)
@@ -139,15 +136,10 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 	sb.WriteString(fmt.Sprintf("\treturn \"%s\"\n", db.dbMgr.name))
 	sb.WriteString("}\n\n")
 
-	// 添加 Cache 方法
+	// 添加 Cache 方法（返回自身类型以支持链式调用）
 	sb.WriteString(fmt.Sprintf("// Cache sets the cache name and TTL for the next query\n"))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Cache(name string, ttl ...time.Duration) *%s {\n", finalStructName, finalStructName))
-	sb.WriteString("\tm.cacheName = name\n")
-	sb.WriteString("\tif len(ttl) > 0 {\n")
-	sb.WriteString("\t\tm.cacheTTL = ttl[0]\n")
-	sb.WriteString("\t} else {\n")
-	sb.WriteString("\t\tm.cacheTTL = -1\n")
-	sb.WriteString("\t}\n")
+	sb.WriteString("\tm.SetCache(name, ttl...)\n")
 	sb.WriteString("\treturn m\n")
 	sb.WriteString("}\n\n")
 
@@ -157,63 +149,44 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 	sb.WriteString("\treturn dbkit.ToJson(m)\n")
 	sb.WriteString("}\n\n")
 
-	// 添加 ActiveRecord 成员方法 (Save, Insert, Update, Delete, FindFirst)
+	// 添加 ActiveRecord 成员方法 (Save, Insert, Update, Delete)
 	sb.WriteString(fmt.Sprintf("// Save saves the %s record (insert or update)\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Save() (int64, error) {\n", finalStructName))
-	sb.WriteString("\treturn dbkit.Use(m.DatabaseName()).SaveDbModel(m)\n")
+	sb.WriteString("\treturn dbkit.SaveDbModel(m)\n")
 	sb.WriteString("}\n\n")
 
 	sb.WriteString(fmt.Sprintf("// Insert inserts the %s record\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Insert() (int64, error) {\n", finalStructName))
-	sb.WriteString("\treturn dbkit.Use(m.DatabaseName()).InsertDbModel(m)\n")
+	sb.WriteString("\treturn dbkit.InsertDbModel(m)\n")
 	sb.WriteString("}\n\n")
 
 	sb.WriteString(fmt.Sprintf("// Update updates the %s record based on its primary key\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Update() (int64, error) {\n", finalStructName))
-	sb.WriteString("\treturn dbkit.Use(m.DatabaseName()).UpdateDbModel(m)\n")
+	sb.WriteString("\treturn dbkit.UpdateDbModel(m)\n")
 	sb.WriteString("}\n\n")
 
 	sb.WriteString(fmt.Sprintf("// Delete deletes the %s record based on its primary key\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Delete() (int64, error) {\n", finalStructName))
-	sb.WriteString("\treturn dbkit.Use(m.DatabaseName()).DeleteDbModel(m)\n")
+	sb.WriteString("\treturn dbkit.DeleteDbModel(m)\n")
 	sb.WriteString("}\n\n")
 
+	// 使用泛型函数简化 FindFirst
 	sb.WriteString(fmt.Sprintf("// FindFirst finds the first %s record based on conditions\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) FindFirst(whereSql string, args ...interface{}) (*%s, error) {\n", finalStructName, finalStructName))
 	sb.WriteString(fmt.Sprintf("\tresult := &%s{}\n", finalStructName))
-	sb.WriteString("\tdb := dbkit.Use(m.DatabaseName())\n")
-	sb.WriteString("\tif m.cacheName != \"\" {\n")
-	sb.WriteString("\t\tdb = db.Cache(m.cacheName, m.cacheTTL)\n")
-	sb.WriteString("\t}\n")
-	sb.WriteString("\terr := db.Table(m.TableName()).Where(whereSql, args...).FindFirstToDbModel(result)\n")
-	sb.WriteString("\tif err != nil {\n")
-	sb.WriteString("\t\treturn nil, err\n")
-	sb.WriteString("\t}\n")
-	sb.WriteString("\treturn result, nil\n")
+	sb.WriteString("\treturn dbkit.FindFirstModel(result, m.GetCache(), whereSql, args...)\n")
 	sb.WriteString("}\n\n")
 
+	// 使用泛型函数简化 Find
 	sb.WriteString(fmt.Sprintf("// Find finds %s records based on conditions\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Find(whereSql string, orderBySql string, args ...interface{}) ([]*%s, error) {\n", finalStructName, finalStructName))
-	sb.WriteString(fmt.Sprintf("\tvar results []*%s\n", finalStructName))
-	sb.WriteString("\tdb := dbkit.Use(m.DatabaseName())\n")
-	sb.WriteString("\tif m.cacheName != \"\" {\n")
-	sb.WriteString("\t\tdb = db.Cache(m.cacheName, m.cacheTTL)\n")
-	sb.WriteString("\t}\n")
-	sb.WriteString(fmt.Sprintf("\terr := db.Table(m.TableName()).Where(whereSql, args...).OrderBy(orderBySql).FindToDbModel(&results)\n"))
-	sb.WriteString("\treturn results, err\n")
+	sb.WriteString(fmt.Sprintf("\treturn dbkit.FindModel[*%s](m, m.GetCache(), whereSql, orderBySql, args...)\n", finalStructName))
 	sb.WriteString("}\n\n")
 
+	// 使用泛型函数简化 Paginate
 	sb.WriteString(fmt.Sprintf("// Paginate paginates %s records based on conditions\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Paginate(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*%s], error) {\n", finalStructName, finalStructName))
-	sb.WriteString("\tdb := dbkit.Use(m.DatabaseName())\n")
-	sb.WriteString("\tif m.cacheName != \"\" {\n")
-	sb.WriteString("\t\tdb = db.Cache(m.cacheName, m.cacheTTL)\n")
-	sb.WriteString("\t}\n")
-	sb.WriteString(fmt.Sprintf("\trecordsPage, err := db.Table(m.TableName()).Where(whereSql, args...).OrderBy(orderBy).Paginate(page, pageSize)\n"))
-	sb.WriteString("\tif err != nil {\n")
-	sb.WriteString("\t\treturn nil, err\n")
-	sb.WriteString("\t}\n")
-	sb.WriteString(fmt.Sprintf("\treturn dbkit.RecordPageToDbModelPage[*%s](recordsPage)\n", finalStructName))
+	sb.WriteString(fmt.Sprintf("\treturn dbkit.PaginateModel[*%s](m, m.GetCache(), page, pageSize, whereSql, orderBy, args...)\n", finalStructName))
 	sb.WriteString("}\n")
 
 	// 4. 写入文件

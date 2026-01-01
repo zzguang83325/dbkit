@@ -12,243 +12,621 @@ import (
 )
 
 func main() {
-	// 1. 连接 MySQL 数据库
+	fmt.Println("========================================")
+	fmt.Println("   DBKit MySQL 综合测试")
+	fmt.Println("========================================")
+
+	// 1. 数据库连接测试
+	testDatabaseConnection()
+
+	// 2. 初始化环境
+	setupTable()
+	prepareData()
+
+	// 3. Record CRUD 测试
+	testRecordCRUD()
+
+	// 4. DbModel CRUD 测试
+	testDbModelCRUD()
+
+	// 5. 链式查询测试
+	testChainQuery()
+
+	// 6. 分页查询测试
+	testPagination()
+
+	// 7. 事务测试
+	testTransaction()
+
+	// 8. 缓存测试
+	testCache()
+
+	// 9. DbModel 缓存测试
+	testDbModelCache()
+
+	// 10. 批量操作测试
+	testBatchOperations()
+
+	// 11. 工具函数测试
+	testUtilityFunctions()
+
+	fmt.Println("\n========================================")
+	fmt.Println("   所有测试完成!")
+	fmt.Println("========================================")
+}
+
+// ==================== 1. 数据库连接测试 ====================
+func testDatabaseConnection() {
+	fmt.Println("\n【1. 数据库连接测试】")
+
 	dsn := "root:123456@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local"
 	err := dbkit.OpenDatabaseWithDBName("mysql", dbkit.MySQL, dsn, 25)
 	if err != nil {
-		log.Fatalf("MySQL数据库连接失败: %v", err)
+		log.Fatalf("❌ 数据库连接失败: %v", err)
 	}
+	fmt.Println("✓ 数据库连接成功")
+
+	// 测试 Ping
+	err = dbkit.PingDB("mysql")
+	if err != nil {
+		log.Fatalf("❌ Ping 失败: %v", err)
+	}
+	fmt.Println("✓ Ping 测试通过")
+
+	// 开启调试模式
 	dbkit.SetDebugMode(true)
-
-	// 2. 初始化环境: 创建表
-	setupTable()
-
-	// 3. 准备数据: 插入 100 条以上的数据
-	prepareData()
-
-	// 4. Record 操作演示
-	demoRecordOperations()
-
-	// 5. DbModel 操作演示
-	demoDbModelOperations()
-
-	// 6. 链式调用演示
-	demoChainOperations()
-
-	// 7. 缓存使用演示
-	demoCacheOperations()
+	fmt.Println("✓ 调试模式已开启")
 }
 
+// ==================== 2. 初始化环境 ====================
 func setupTable() {
+	fmt.Println("\n【2. 初始化测试表】")
+
+	// 删除旧表重新创建
+	dbkit.Use("mysql").Exec("DROP TABLE IF EXISTS demo")
+
 	sql := `
-	CREATE TABLE IF NOT EXISTS demo (
+	CREATE TABLE demo (
 		id INT AUTO_INCREMENT PRIMARY KEY,
 		name VARCHAR(100),
 		age INT,
 		salary DECIMAL(10, 2),
-		is_active BOOLEAN,
+		is_active TINYINT(1) DEFAULT 1,
 		birthday DATE,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		metadata TEXT
 	)`
 	_, err := dbkit.Use("mysql").Exec(sql)
 	if err != nil {
-		log.Fatalf("创建表失败: %v", err)
+		log.Fatalf("❌ 创建表失败: %v", err)
 	}
-	fmt.Println("MySQL: Table 'demo' ensured.")
+	fmt.Println("✓ 表 'demo' 创建成功")
 }
 
 func prepareData() {
-	count, _ := dbkit.Use("mysql").Count("demo", "")
-	if count >= 100 {
-		fmt.Printf("MySQL: Already has %d rows, skipping data preparation.\n", count)
-		return
-	}
+	fmt.Println("\n【准备测试数据】")
 
-	fmt.Println("MySQL: Inserting 110 rows of data...")
-	records := make([]*dbkit.Record, 0, 110)
-	for i := 1; i <= 110; i++ {
+	records := make([]*dbkit.Record, 0, 50)
+	for i := 1; i <= 50; i++ {
 		record := dbkit.NewRecord().
 			Set("name", fmt.Sprintf("User_%d", i)).
 			Set("age", 18+rand.Intn(40)).
 			Set("salary", 3000.0+rand.Float64()*7000.0).
-			Set("is_active", i%2 == 0).
+			Set("is_active", i%2).
 			Set("birthday", time.Now().AddDate(-20-rand.Intn(10), 0, 0)).
-			Set("metadata", fmt.Sprintf(`{"tag": "tag_%d", "info": "info_%d"}`, i, i))
+			Set("metadata", fmt.Sprintf(`{"tag": "tag_%d"}`, i))
 		records = append(records, record)
 	}
-	dbkit.Use("mysql").BatchInsert("demo", records, 100)
-	fmt.Println("MySQL: Data preparation complete.")
+
+	affected, err := dbkit.Use("mysql").BatchInsert("demo", records, 50)
+	if err != nil {
+		log.Fatalf("❌ 批量插入失败: %v", err)
+	}
+	fmt.Printf("✓ 批量插入 %d 条数据\n", affected)
 }
 
-func demoRecordOperations() {
-	fmt.Println("\n--- Record Operations ---")
+// ==================== 3. Record CRUD 测试 ====================
+func testRecordCRUD() {
+	fmt.Println("\n【3. Record CRUD 测试】")
 
-	// 插入
-	newRec := dbkit.NewRecord().Set("name", "RecordUser").Set("age", 25)
-	id, _ := dbkit.Use("mysql").Insert("demo", newRec)
-	fmt.Printf("Inserted Record ID: %d\n", id)
+	// Insert
+	newRec := dbkit.NewRecord().
+		Set("name", "TestRecord").
+		Set("age", 30).
+		Set("salary", 8000.50).
+		Set("is_active", 1)
+	id, err := dbkit.Use("mysql").Insert("demo", newRec)
+	if err != nil {
+		log.Printf("❌ Insert 失败: %v", err)
+	} else {
+		fmt.Printf("✓ Insert 成功, ID: %d\n", id)
+	}
 
-	// 多条件查询
-	records, _ := dbkit.Use("mysql").Query("SELECT * FROM demo WHERE age > ? AND is_active = ?", 30, true)
-	fmt.Printf("Query returned %d records\n", len(records))
+	// Query
+	records, err := dbkit.Use("mysql").Query("SELECT * FROM demo WHERE id = ?", id)
+	if err != nil || len(records) == 0 {
+		log.Printf("❌ Query 失败: %v", err)
+	} else {
+		fmt.Printf("✓ Query 成功, Name: %s\n", records[0].GetString("name"))
+	}
 
-	// 分页查询
-	page, _ := dbkit.Use("mysql").Paginate(1, 10, "*", "demo", "age > ?", "id DESC", 20)
-	fmt.Printf("Paginate: Page %d/%d, TotalRows: %d, ListSize: %d\n", page.PageNumber, page.TotalPage, page.TotalRow, len(page.List))
+	// QueryFirst
+	record, err := dbkit.Use("mysql").QueryFirst("SELECT * FROM demo WHERE id = ?", id)
+	if err != nil || record == nil {
+		log.Printf("❌ QueryFirst 失败: %v", err)
+	} else {
+		fmt.Printf("✓ QueryFirst 成功, Age: %d\n", record.GetInt("age"))
+	}
 
-	// 更新
-	updateRec := dbkit.NewRecord().Set("salary", 9999.99)
-	rows, _ := dbkit.Use("mysql").Update("demo", updateRec, "id = ?", id)
-	fmt.Printf("Updated %d rows\n", rows)
+	// Update
+	updateRec := dbkit.NewRecord().Set("age", 35).Set("salary", 9500.00)
+	affected, err := dbkit.Use("mysql").Update("demo", updateRec, "id = ?", id)
+	if err != nil {
+		log.Printf("❌ Update 失败: %v", err)
+	} else {
+		fmt.Printf("✓ Update 成功, 影响行数: %d\n", affected)
+	}
 
-	// 删除
-	dbkit.Use("mysql").Delete("demo", "id = ?", id)
+	// Save (更新已存在记录)
+	record.Set("name", "TestRecord_Updated")
+	affected, err = dbkit.Use("mysql").Save("demo", record)
+	if err != nil {
+		log.Printf("❌ Save 失败: %v", err)
+	} else {
+		fmt.Printf("✓ Save 成功, 影响行数: %d\n", affected)
+	}
+
+	// Count
+	count, err := dbkit.Use("mysql").Count("demo", "age > ?", 25)
+	if err != nil {
+		log.Printf("❌ Count 失败: %v", err)
+	} else {
+		fmt.Printf("✓ Count 成功, 数量: %d\n", count)
+	}
+
+	// Exists
+	exists, err := dbkit.Use("mysql").Exists("demo", "id = ?", id)
+	if err != nil {
+		log.Printf("❌ Exists 失败: %v", err)
+	} else {
+		fmt.Printf("✓ Exists 成功, 存在: %v\n", exists)
+	}
+
+	// Delete
+	affected, err = dbkit.Use("mysql").Delete("demo", "id = ?", id)
+	if err != nil {
+		log.Printf("❌ Delete 失败: %v", err)
+	} else {
+		fmt.Printf("✓ Delete 成功, 影响行数: %d\n", affected)
+	}
 }
 
-func demoDbModelOperations() {
-	fmt.Println("\n--- MySQL DbModel CRUD Operations ---")
+// ==================== 4. DbModel CRUD 测试 ====================
+func testDbModelCRUD() {
+	fmt.Println("\n【4. DbModel CRUD 测试】")
+
+	// Insert
+	user := &models.Demo{
+		Name:     "ModelUser",
+		Age:      28,
+		Salary:   7500.00,
+		IsActive: 1,
+		Birthday: time.Now().AddDate(-28, 0, 0),
+		Metadata: `{"role": "admin"}`,
+	}
+	id, err := user.Insert()
+	if err != nil {
+		log.Printf("❌ DbModel Insert 失败: %v", err)
+	} else {
+		fmt.Printf("✓ DbModel Insert 成功, ID: %d\n", id)
+		user.ID = id
+	}
+
+	// FindFirst
+	found := &models.Demo{}
+	found, err = found.FindFirst("id = ?", id)
+	if err != nil {
+		log.Printf("❌ DbModel FindFirst 失败: %v", err)
+	} else {
+		fmt.Printf("✓ DbModel FindFirst 成功, Name: %s\n", found.Name)
+	}
+
+	// Update
+	found.Age = 30
+	found.Salary = 8500.00
+	affected, err := found.Update()
+	if err != nil {
+		log.Printf("❌ DbModel Update 失败: %v", err)
+	} else {
+		fmt.Printf("✓ DbModel Update 成功, 影响行数: %d\n", affected)
+	}
+
+	// Save
+	found.Name = "ModelUser_Saved"
+	affected, err = found.Save()
+	if err != nil {
+		log.Printf("❌ DbModel Save 失败: %v", err)
+	} else {
+		fmt.Printf("✓ DbModel Save 成功, 影响行数: %d\n", affected)
+	}
+
+	// Find (查询多条)
 	model := &models.Demo{}
-
-	// 1. Insert
-	newUser := &models.Demo{
-		Name:      "New_MySQL_User",
-		Age:       28,
-		Salary:    8888.88,
-		IsActive:  1,
-		Birthday:  time.Now(),
-		CreatedAt: time.Now(),
-		Metadata:  `{"tag": "new", "info": "model_test"}`,
-	}
-	id, err := newUser.Insert()
+	results, err := model.Find("age >= ?", "id DESC", 20)
 	if err != nil {
-		log.Printf("MySQL DbModel Insert failed: %v", err)
-		return
-	}
-	fmt.Printf("MySQL DbModel Insert: ID = %d\n", id)
-	newUser.ID = id
-
-	// 2. FindFirst (Read)
-	foundUser, err := model.FindFirst("name = ?", "New_MySQL_User")
-	if err != nil {
-		log.Printf("MySQL DbModel FindFirst failed: %v", err)
-	} else if foundUser != nil {
-		fmt.Printf("MySQL DbModel FindFirst: Found user %s, Age: %d\n", foundUser.Name, foundUser.Age)
-	}
-
-	// 3. Update
-	foundUser.Age = 35
-	foundUser.Salary = 9999.99
-	affected, err := foundUser.Update()
-	if err != nil {
-		log.Printf("MySQL DbModel Update failed: %v", err)
+		log.Printf("❌ DbModel Find 失败: %v", err)
 	} else {
-		fmt.Printf("MySQL DbModel Update: %d rows affected\n", affected)
+		fmt.Printf("✓ DbModel Find 成功, 数量: %d\n", len(results))
 	}
 
-	// 4. Find (Read)
-	results, err := model.Find("age >= ?", "id DESC", 30)
-	if err != nil {
-		log.Printf("MySQL DbModel Find failed: %v", err)
-	} else {
-		fmt.Printf("MySQL DbModel Find: %d results, first user: %s\n", len(results), results[0].Name)
-	}
-
-	// 5. Paginate (Read)
+	// Paginate
 	page, err := model.Paginate(1, 10, "age > ?", "id ASC", 20)
 	if err != nil {
-		log.Printf("MySQL DbModel Paginate failed: %v", err)
+		log.Printf("❌ DbModel Paginate 失败: %v", err)
 	} else {
-		fmt.Printf("MySQL DbModel Paginate: Total %d rows, current page size %d\n", page.TotalRow, len(page.List))
+		fmt.Printf("✓ DbModel Paginate 成功, 总数: %d, 当前页: %d\n", page.TotalRow, len(page.List))
 	}
 
-	// 6. Delete
-	affected, err = foundUser.Delete()
+	// ToJson
+	jsonStr := found.ToJson()
+	fmt.Printf("✓ DbModel ToJson: %s\n", jsonStr[:min(80, len(jsonStr))]+"...")
+
+	// Delete
+	affected, err = found.Delete()
 	if err != nil {
-		log.Printf("MySQL DbModel Delete failed: %v", err)
+		log.Printf("❌ DbModel Delete 失败: %v", err)
 	} else {
-		fmt.Printf("MySQL DbModel Delete: %d rows affected\n", affected)
+		fmt.Printf("✓ DbModel Delete 成功, 影响行数: %d\n", affected)
 	}
 }
 
-func demoChainOperations() {
-	fmt.Println("\n--- Chain Operations (QueryBuilder) ---")
+// ==================== 5. 链式查询测试 ====================
+func testChainQuery() {
+	fmt.Println("\n【5. 链式查询测试】")
 
-	// 链式查询多条件 + 排序 + 限制
-	records, _ := dbkit.Use("mysql").Table("demo").
-		Where("age >= ?", 20).
-		Where("salary > ?", 5000).
-		OrderBy("age DESC, salary ASC").
+	// 基本链式查询
+	records, err := dbkit.Use("mysql").Table("demo").
+		Select("id, name, age, salary").
+		Where("age >= ?", 25).
+		Where("is_active = ?", 1).
+		OrderBy("age DESC").
 		Limit(5).
 		Find()
+	if err != nil {
+		log.Printf("❌ 链式查询 Find 失败: %v", err)
+	} else {
+		fmt.Printf("✓ 链式查询 Find 成功, 数量: %d\n", len(records))
+		for i, r := range records {
+			if i < 3 {
+				fmt.Printf("  - %s (Age: %d, Salary: %.2f)\n", r.GetString("name"), r.GetInt("age"), r.GetFloat("salary"))
+			}
+		}
+	}
 
-	fmt.Printf("Chain Query: %d results\n", len(records))
-	for i, r := range records {
-		fmt.Printf("  [%d] %s (Age: %v, Salary: %v)\n", i, r.Get("name"), r.Get("age"), r.Get("salary"))
+	// FindFirst
+	record, err := dbkit.Use("mysql").Table("demo").
+		Where("age > ?", 30).
+		OrderBy("salary DESC").
+		FindFirst()
+	if err != nil {
+		log.Printf("❌ 链式查询 FindFirst 失败: %v", err)
+	} else if record != nil {
+		fmt.Printf("✓ 链式查询 FindFirst 成功, Name: %s\n", record.GetString("name"))
+	}
+
+	// FindToDbModel
+	var users []models.Demo
+	err = dbkit.Use("mysql").Table("demo").
+		Where("age > ?", 20).
+		OrderBy("id ASC").
+		Limit(5).
+		FindToDbModel(&users)
+	if err != nil {
+		log.Printf("❌ 链式查询 FindToDbModel 失败: %v", err)
+	} else {
+		fmt.Printf("✓ 链式查询 FindToDbModel 成功, 数量: %d\n", len(users))
+	}
+
+	// Count
+	count, err := dbkit.Use("mysql").Table("demo").
+		Where("salary > ?", 5000).
+		Count()
+	if err != nil {
+		log.Printf("❌ 链式查询 Count 失败: %v", err)
+	} else {
+		fmt.Printf("✓ 链式查询 Count 成功, 数量: %d\n", count)
+	}
+
+	// Delete (链式)
+	// 先插入一条测试数据
+	testRec := dbkit.NewRecord().Set("name", "ToDelete").Set("age", 99)
+	dbkit.Use("mysql").Insert("demo", testRec)
+
+	affected, err := dbkit.Use("mysql").Table("demo").
+		Where("name = ?", "ToDelete").
+		Delete()
+	if err != nil {
+		log.Printf("❌ 链式查询 Delete 失败: %v", err)
+	} else {
+		fmt.Printf("✓ 链式查询 Delete 成功, 影响行数: %d\n", affected)
+	}
+}
+
+// ==================== 6. 分页查询测试 ====================
+func testPagination() {
+	fmt.Println("\n【6. 分页查询测试】")
+
+	// 使用 Paginate 函数
+	page, err := dbkit.Use("mysql").Paginate(1, 10, "*", "demo", "age > ?", "id ASC", 20)
+	if err != nil {
+		log.Printf("❌ Paginate 失败: %v", err)
+	} else {
+		fmt.Printf("✓ Paginate 成功:\n")
+		fmt.Printf("  - 当前页: %d\n", page.PageNumber)
+		fmt.Printf("  - 每页大小: %d\n", page.PageSize)
+		fmt.Printf("  - 总页数: %d\n", page.TotalPage)
+		fmt.Printf("  - 总记录数: %d\n", page.TotalRow)
+		fmt.Printf("  - 当前页数据量: %d\n", len(page.List))
 	}
 
 	// 链式分页
-	page, _ := dbkit.Use("mysql").Table("demo").
-		Where("is_active = ?", true).
+	page2, err := dbkit.Use("mysql").Table("demo").
+		Select("id, name, age").
+		Where("is_active = ?", 1).
 		OrderBy("created_at DESC").
-		Paginate(1, 10)
-	fmt.Printf("Chain Paginate: Total %d rows\n", page.TotalRow)
+		Paginate(2, 5)
+	if err != nil {
+		log.Printf("❌ 链式 Paginate 失败: %v", err)
+	} else {
+		fmt.Printf("✓ 链式 Paginate 成功, 第%d页, 共%d条\n", page2.PageNumber, page2.TotalRow)
+	}
 }
 
-func demoCacheOperations() {
-	fmt.Println("\n--- MySQL Cache Operations ---")
-	var results []models.Demo
-	// First call - should hit DB and save to cache
+// ==================== 7. 事务测试 ====================
+func testTransaction() {
+	fmt.Println("\n【7. 事务测试】")
+
+	// 成功的事务
+	err := dbkit.Use("mysql").Transaction(func(tx *dbkit.Tx) error {
+		// 插入
+		rec1 := dbkit.NewRecord().Set("name", "TxUser1").Set("age", 25)
+		_, err := tx.Insert("demo", rec1)
+		if err != nil {
+			return err
+		}
+
+		// 更新
+		rec2 := dbkit.NewRecord().Set("salary", 10000)
+		_, err = tx.Update("demo", rec2, "name = ?", "TxUser1")
+		return err
+	})
+	if err != nil {
+		log.Printf("❌ 事务(成功) 失败: %v", err)
+	} else {
+		fmt.Println("✓ 事务(成功) 测试通过")
+	}
+
+	// 回滚的事务
+	err = dbkit.Use("mysql").Transaction(func(tx *dbkit.Tx) error {
+		rec := dbkit.NewRecord().Set("name", "TxUser_Rollback").Set("age", 30)
+		tx.Insert("demo", rec)
+		// 模拟错误，触发回滚
+		return fmt.Errorf("模拟错误，触发回滚")
+	})
+	if err != nil {
+		fmt.Printf("✓ 事务(回滚) 测试通过, 错误: %v\n", err)
+	}
+
+	// 验证回滚
+	exists, _ := dbkit.Use("mysql").Exists("demo", "name = ?", "TxUser_Rollback")
+	if !exists {
+		fmt.Println("✓ 事务回滚验证通过, 数据未插入")
+	}
+
+	// 清理事务测试数据
+	dbkit.Use("mysql").Delete("demo", "name LIKE ?", "TxUser%")
+}
+
+// ==================== 8. 缓存测试 ====================
+func testCache() {
+	fmt.Println("\n【8. 缓存测试】")
+
+	// 创建缓存
+	dbkit.CreateCache("test_cache", 5*time.Minute)
+	fmt.Println("✓ 缓存 'test_cache' 创建成功")
+
+	// 第一次查询 (从数据库)
 	start := time.Now()
-	err := dbkit.Use("mysql").Cache("mysql_demo_cache", 60).Table("demo").Where("age > ?", 35).FindToDbModel(&results)
+	records, err := dbkit.Use("mysql").Cache("test_cache", 60*time.Second).
+		Query("SELECT * FROM demo WHERE age > ?", 25)
 	if err != nil {
-		log.Printf("MySQL Cache Find (1st) failed: %v", err)
+		log.Printf("❌ 缓存查询(1st) 失败: %v", err)
 	} else {
-		fmt.Printf("MySQL Cache Find (1st): %d results, took %v\n", len(results), time.Since(start))
+		fmt.Printf("✓ 缓存查询(1st) 成功, 数量: %d, 耗时: %v\n", len(records), time.Since(start))
 	}
 
-	// Second call - should hit cache
+	// 第二次查询 (从缓存)
 	start = time.Now()
-	err = dbkit.Use("mysql").Cache("mysql_demo_cache", 60).Table("demo").Where("age > ?", 35).FindToDbModel(&results)
+	records, err = dbkit.Use("mysql").Cache("test_cache", 60*time.Second).
+		Query("SELECT * FROM demo WHERE age > ?", 25)
 	if err != nil {
-		log.Printf("MySQL Cache Find (2nd) failed: %v", err)
+		log.Printf("❌ 缓存查询(2nd) 失败: %v", err)
 	} else {
-		fmt.Printf("MySQL Cache Find (2nd): %d results, took %v (from cache)\n", len(results), time.Since(start))
+		fmt.Printf("✓ 缓存查询(2nd) 成功, 数量: %d, 耗时: %v (应更快)\n", len(records), time.Since(start))
 	}
 
-	// Test Paginate cache
-	fmt.Println("\n--- MySQL Paginate Cache Operations ---")
-	start = time.Now()
-	page, err := dbkit.Use("mysql").Cache("mysql_page_cache", 60).Table("demo").Where("age > ?", 30).Paginate(1, 10)
+	// 手动缓存操作
+	dbkit.CacheSet("manual_cache", "key1", "value1", 1*time.Minute)
+	val, ok := dbkit.CacheGet("manual_cache", "key1")
+	if ok {
+		fmt.Printf("✓ 手动缓存 Get 成功, 值: %v\n", val)
+	}
+
+	dbkit.CacheDelete("manual_cache", "key1")
+	_, ok = dbkit.CacheGet("manual_cache", "key1")
+	if !ok {
+		fmt.Println("✓ 手动缓存 Delete 成功")
+	}
+
+	// 缓存状态
+	status := dbkit.CacheStatus()
+	fmt.Printf("✓ 缓存状态: 类型=%v, 项数=%v\n", status["type"], status["total_items"])
+}
+
+// ==================== 9. DbModel 缓存测试 ====================
+func testDbModelCache() {
+	fmt.Println("\n【9. DbModel 缓存测试】")
+
+	model := &models.Demo{}
+
+	// 第一次查询 (从数据库)
+	start := time.Now()
+	results, err := model.Cache("model_cache", 60*time.Second).Find("age > ?", "id ASC", 20)
 	if err != nil {
-		log.Printf("MySQL Paginate Cache (1st) failed: %v", err)
+		log.Printf("❌ DbModel 缓存查询(1st) 失败: %v", err)
 	} else {
-		fmt.Printf("MySQL Paginate Cache (1st): %d results, took %v\n", len(page.List), time.Since(start))
+		fmt.Printf("✓ DbModel 缓存查询(1st) 成功, 数量: %d, 耗时: %v\n", len(results), time.Since(start))
+	}
+
+	// 第二次查询 (从缓存)
+	start = time.Now()
+	results, err = model.Cache("model_cache", 60*time.Second).Find("age > ?", "id ASC", 20)
+	if err != nil {
+		log.Printf("❌ DbModel 缓存查询(2nd) 失败: %v", err)
+	} else {
+		fmt.Printf("✓ DbModel 缓存查询(2nd) 成功, 数量: %d, 耗时: %v (应更快)\n", len(results), time.Since(start))
+	}
+
+	// 分页缓存
+	start = time.Now()
+	page, err := model.Cache("page_cache", 60*time.Second).Paginate(1, 10, "age > ?", "id DESC", 20)
+	if err != nil {
+		log.Printf("❌ DbModel 分页缓存(1st) 失败: %v", err)
+	} else {
+		fmt.Printf("✓ DbModel 分页缓存(1st) 成功, 总数: %d, 耗时: %v\n", page.TotalRow, time.Since(start))
 	}
 
 	start = time.Now()
-	page, err = dbkit.Use("mysql").Cache("mysql_page_cache", 60).Table("demo").Where("age > ?", 30).Paginate(1, 10)
+	page, err = model.Cache("page_cache", 60*time.Second).Paginate(1, 10, "age > ?", "id DESC", 20)
 	if err != nil {
-		log.Printf("MySQL Paginate Cache (2nd) failed: %v", err)
+		log.Printf("❌ DbModel 分页缓存(2nd) 失败: %v", err)
 	} else {
-		fmt.Printf("MySQL Paginate Cache (2nd): %d results, took %v (from cache)\n", len(page.List), time.Since(start))
+		fmt.Printf("✓ DbModel 分页缓存(2nd) 成功, 总数: %d, 耗时: %v (应更快)\n", page.TotalRow, time.Since(start))
+	}
+}
+
+// ==================== 10. 批量操作测试 ====================
+func testBatchOperations() {
+	fmt.Println("\n【10. 批量操作测试】")
+
+	// 批量插入
+	records := make([]*dbkit.Record, 0, 20)
+	for i := 1; i <= 20; i++ {
+		rec := dbkit.NewRecord().
+			Set("name", fmt.Sprintf("BatchUser_%d", i)).
+			Set("age", 20+i).
+			Set("salary", 5000.0+float64(i)*100)
+		records = append(records, rec)
 	}
 
-	// Test Count cache
-	fmt.Println("\n--- MySQL Count Cache Operations ---")
-	start = time.Now()
-	count, err := dbkit.Use("mysql").Cache("mysql_count_cache", 60).Table("demo").Where("age > ?", 30).Count()
+	affected, err := dbkit.Use("mysql").BatchInsert("demo", records, 10)
 	if err != nil {
-		log.Printf("MySQL Count Cache (1st) failed: %v", err)
+		log.Printf("❌ BatchInsert 失败: %v", err)
 	} else {
-		fmt.Printf("MySQL Count Cache (1st): %d, took %v\n", count, time.Since(start))
+		fmt.Printf("✓ BatchInsert 成功, 影响行数: %d\n", affected)
 	}
 
-	start = time.Now()
-	count, err = dbkit.Use("mysql").Cache("mysql_count_cache", 60).Table("demo").Where("age > ?", 30).Count()
-	if err != nil {
-		log.Printf("MySQL Count Cache (2nd) failed: %v", err)
-	} else {
-		fmt.Printf("MySQL Count Cache (2nd): %d, took %v (from cache)\n", count, time.Since(start))
+	// BatchInsertDefault
+	records2 := make([]*dbkit.Record, 0, 5)
+	for i := 1; i <= 5; i++ {
+		rec := dbkit.NewRecord().
+			Set("name", fmt.Sprintf("BatchDefault_%d", i)).
+			Set("age", 30+i)
+		records2 = append(records2, rec)
 	}
+
+	affected, err = dbkit.Use("mysql").BatchInsertDefault("demo", records2)
+	if err != nil {
+		log.Printf("❌ BatchInsertDefault 失败: %v", err)
+	} else {
+		fmt.Printf("✓ BatchInsertDefault 成功, 影响行数: %d\n", affected)
+	}
+
+	// 清理批量测试数据
+	dbkit.Use("mysql").Delete("demo", "name LIKE ?", "Batch%")
+}
+
+// ==================== 11. 工具函数测试 ====================
+func testUtilityFunctions() {
+	fmt.Println("\n【11. 工具函数测试】")
+
+	// Record 转换
+	record := dbkit.NewRecord().
+		Set("id", 1).
+		Set("name", "TestUser").
+		Set("age", 25).
+		Set("salary", 8000.50)
+
+	// ToJson
+	jsonStr := record.ToJson()
+	fmt.Printf("✓ Record.ToJson: %s\n", jsonStr)
+
+	// ToMap
+	m := record.ToMap()
+	fmt.Printf("✓ Record.ToMap: %v\n", m)
+
+	// 类型获取
+	fmt.Printf("✓ Record.GetString: %s\n", record.GetString("name"))
+	fmt.Printf("✓ Record.GetInt: %d\n", record.GetInt("age"))
+	fmt.Printf("✓ Record.GetFloat: %.2f\n", record.GetFloat("salary"))
+
+	// Has / Keys
+	fmt.Printf("✓ Record.Has('name'): %v\n", record.Has("name"))
+	fmt.Printf("✓ Record.Keys: %v\n", record.Keys())
+
+	// FromJson
+	newRecord := dbkit.NewRecord()
+	newRecord.FromJson(`{"name": "JsonUser", "age": 30}`)
+	fmt.Printf("✓ Record.FromJson: name=%s, age=%d\n", newRecord.GetString("name"), newRecord.GetInt("age"))
+
+	// ToStruct
+	type User struct {
+		ID     int64   `column:"id"`
+		Name   string  `column:"name"`
+		Age    int     `column:"age"`
+		Salary float64 `column:"salary"`
+	}
+	var user User
+	record.ToStruct(&user)
+	fmt.Printf("✓ Record.ToStruct: %+v\n", user)
+
+	// SnakeToCamel
+	camel := dbkit.SnakeToCamel("user_name_test")
+	fmt.Printf("✓ SnakeToCamel: user_name_test -> %s\n", camel)
+
+	// ValidateTableName
+	err := dbkit.ValidateTableName("valid_table")
+	if err == nil {
+		fmt.Println("✓ ValidateTableName: 'valid_table' 验证通过")
+	}
+
+	err = dbkit.ValidateTableName("invalid;table")
+	if err != nil {
+		fmt.Printf("✓ ValidateTableName: 'invalid;table' 验证失败 (预期行为)\n")
+	}
+
+	// SupportedDrivers
+	drivers := dbkit.SupportedDrivers()
+	fmt.Printf("✓ SupportedDrivers: %v\n", drivers)
+
+	// IsValidDriver
+	fmt.Printf("✓ IsValidDriver(MySQL): %v\n", dbkit.IsValidDriver(dbkit.MySQL))
+	fmt.Printf("✓ IsValidDriver('invalid'): %v\n", dbkit.IsValidDriver("invalid"))
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

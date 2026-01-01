@@ -57,9 +57,13 @@ func (r *redisCache) CacheSet(cacheName, key string, value interface{}, ttl time
 	case string, []byte:
 		data = value
 	default:
-		if jsonData, err := json.Marshal(value); err == nil {
-			data = jsonData
+		jsonData, err := json.Marshal(value)
+		if err != nil {
+			// 序列化失败，记录日志并跳过存储
+			fmt.Printf("dbkit: redis cache marshal failed, key=%s, error=%v\n", fullKey, err)
+			return
 		}
+		data = jsonData
 	}
 
 	r.client.Set(r.ctx, fullKey, data, ttl)

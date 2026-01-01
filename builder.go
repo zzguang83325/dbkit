@@ -24,6 +24,11 @@ type QueryBuilder struct {
 
 // Table starts a new query builder for the default database
 func Table(name string) *QueryBuilder {
+
+	if err := validateIdentifier(name); err != nil {
+		return &QueryBuilder{lastErr: err}
+	}
+
 	db, err := defaultDB()
 	if err != nil {
 		return &QueryBuilder{lastErr: err}
@@ -37,6 +42,10 @@ func Table(name string) *QueryBuilder {
 
 // Table method for DB instance
 func (db *DB) Table(name string) *QueryBuilder {
+
+	if err := validateIdentifier(name); err != nil {
+		return &QueryBuilder{lastErr: err}
+	}
 	return &QueryBuilder{
 		db:        db,
 		table:     name,
@@ -49,6 +58,10 @@ func (db *DB) Table(name string) *QueryBuilder {
 
 // Table method for Tx instance
 func (tx *Tx) Table(name string) *QueryBuilder {
+	if err := validateIdentifier(name); err != nil {
+		return &QueryBuilder{lastErr: err}
+	}
+
 	return &QueryBuilder{
 		tx:        tx,
 		table:     name,

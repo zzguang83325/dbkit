@@ -44,7 +44,9 @@ func newLocalCache(cleanupInterval time.Duration) *localCache {
 		cleanupInterval: cleanupInterval,
 	}
 	// 启动定期清理过期缓存的任务
-	go lc.startCleanupTimer()
+	cleanupOnce.Do(func() {
+		go lc.startCleanupTimer()
+	})
 	return lc
 }
 
@@ -216,6 +218,7 @@ var (
 	defaultTTL   time.Duration = time.Minute
 	cacheConfigs sync.Map      // map[cacheName]time.Duration
 	cacheMu      sync.RWMutex
+	cleanupOnce  sync.Once
 )
 
 // GetCache returns the current global cache provider

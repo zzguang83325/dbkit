@@ -2,21 +2,21 @@ package models
 
 import (
 	"time"
+
 	"github.com/zzguang83325/dbkit"
 )
 
 // Demo represents the demo table
 type Demo struct {
-	cacheName string
-	cacheTTL  time.Duration
-	ID int64 `column:"id" json:"id"`
-	Name string `column:"name" json:"name"`
-	Age int64 `column:"age" json:"age"`
-	Salary float64 `column:"salary" json:"salary"`
-	IsActive bool `column:"is_active" json:"is_active"`
-	Birthday time.Time `column:"birthday" json:"birthday"`
+	dbkit.ModelCache
+	ID        int64     `column:"id" json:"id"`
+	Name      string    `column:"name" json:"name"`
+	Age       int64     `column:"age" json:"age"`
+	Salary    float64   `column:"salary" json:"salary"`
+	IsActive  bool      `column:"is_active" json:"is_active"`
+	Birthday  time.Time `column:"birthday" json:"birthday"`
 	CreatedAt time.Time `column:"created_at" json:"created_at"`
-	Metadata string `column:"metadata" json:"metadata"`
+	Metadata  string    `column:"metadata" json:"metadata"`
 }
 
 // TableName returns the table name for Demo struct
@@ -31,12 +31,7 @@ func (m *Demo) DatabaseName() string {
 
 // Cache sets the cache name and TTL for the next query
 func (m *Demo) Cache(name string, ttl ...time.Duration) *Demo {
-	m.cacheName = name
-	if len(ttl) > 0 {
-		m.cacheTTL = ttl[0]
-	} else {
-		m.cacheTTL = -1
-	}
+	m.SetCache(name, ttl...)
 	return m
 }
 
@@ -68,37 +63,15 @@ func (m *Demo) Delete() (int64, error) {
 // FindFirst finds the first Demo record based on conditions
 func (m *Demo) FindFirst(whereSql string, args ...interface{}) (*Demo, error) {
 	result := &Demo{}
-	db := dbkit.Use(m.DatabaseName())
-	if m.cacheName != "" {
-		db = db.Cache(m.cacheName, m.cacheTTL)
-	}
-	err := db.Table(m.TableName()).Where(whereSql, args...).FindFirstToDbModel(result)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
+	return dbkit.FindFirstModel(result, m.GetCache(), whereSql, args...)
 }
 
 // Find finds Demo records based on conditions
 func (m *Demo) Find(whereSql string, orderBySql string, args ...interface{}) ([]*Demo, error) {
-	var results []*Demo
-	db := dbkit.Use(m.DatabaseName())
-	if m.cacheName != "" {
-		db = db.Cache(m.cacheName, m.cacheTTL)
-	}
-	err := db.Table(m.TableName()).Where(whereSql, args...).OrderBy(orderBySql).FindToDbModel(&results)
-	return results, err
+	return dbkit.FindModel[*Demo](m, m.GetCache(), whereSql, orderBySql, args...)
 }
 
 // Paginate paginates Demo records based on conditions
 func (m *Demo) Paginate(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*Demo], error) {
-	db := dbkit.Use(m.DatabaseName())
-	if m.cacheName != "" {
-		db = db.Cache(m.cacheName, m.cacheTTL)
-	}
-	recordsPage, err := db.Table(m.TableName()).Where(whereSql, args...).OrderBy(orderBy).Paginate(page, pageSize)
-	if err != nil {
-		return nil, err
-	}
-	return dbkit.RecordPageToDbModelPage[*Demo](recordsPage)
+	return dbkit.PaginateModel[*Demo](m, m.GetCache(), page, pageSize, whereSql, orderBy, args...)
 }

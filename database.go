@@ -1770,6 +1770,7 @@ func (mgr *dbManager) initDB() error {
 
 	// Verify connection
 	if err := db.Ping(); err != nil {
+		db.Close()
 		return err
 	}
 

@@ -125,21 +125,13 @@ func Count(table string, whereSql string, whereArgs ...interface{}) (int64, erro
 	return db.Count(table, whereSql, whereArgs...)
 }
 
-func Exists(table string, whereSql string, whereArgs ...interface{}) bool {
-	db, err := defaultDB()
-	if err != nil {
-		return false
-	}
-	result, _ := db.Exists(table, whereSql, whereArgs...)
-	return result
-}
-
-func ExistsWithError(table string, whereSql string, whereArgs ...interface{}) (bool, error) {
+func Exists(table string, whereSql string, whereArgs ...interface{}) (bool, error) {
 	db, err := defaultDB()
 	if err != nil {
 		return false, err
 	}
 	return db.Exists(table, whereSql, whereArgs...)
+
 }
 
 func Paginate(page int, pageSize int, selectSql string, table string, whereSql string, orderBySql string, args ...interface{}) (*Page[Record], error) {
@@ -561,7 +553,7 @@ func (db *DB) FindToDbModel(dest interface{}, table string, whereSql string, ord
 }
 
 // Transaction executes a function within a transaction
-func (db *DB) Transaction(fn func(*Tx) error) error {
+func (db *DB) Transaction(fn func(*Tx) error) (err error) {
 	if db.lastErr != nil {
 		return db.lastErr
 	}
@@ -574,13 +566,22 @@ func (db *DB) Transaction(fn func(*Tx) error) error {
 
 	defer func() {
 		if p := recover(); p != nil {
-			_ = tx.Rollback()
-			panic(p)
+			if rbErr := tx.Rollback(); rbErr != nil {
+				LogError("transaction rollback failed on panic", map[string]interface{}{
+					"rollback_error": rbErr.Error(),
+				})
+			}
+			err = fmt.Errorf("transaction panic: %v", p)
 		}
 	}()
 
-	if err := fn(dbtx); err != nil {
-		_ = tx.Rollback()
+	if err = fn(dbtx); err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			LogError("transaction rollback failed", map[string]interface{}{
+				"original_error": err.Error(),
+				"rollback_error": rbErr.Error(),
+			})
+		}
 		return err
 	}
 
