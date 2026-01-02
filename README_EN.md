@@ -19,9 +19,58 @@ DBKit is a high-performance, lightweight database operation library for Go, insp
 - **Logging**: Built-in SQL logging with easy integration for various logging systems
 - **Cache Support**: Built-in two-level cache supporting local memory and Redis cache with chain query caching
 - **Connection Pool Management**: Built-in connection pool management for improved performance
+- **Connection Pool Monitoring**: Connection pool statistics with Prometheus metrics export
 - **Query Timeout Control**: Global and per-query timeout settings to prevent slow queries from blocking
+- **Auto Timestamps**: Configurable auto timestamp fields, automatically populate created_at and updated_at on insert and update
 - **Soft Delete Support**: Configurable soft delete fields, automatic filtering of deleted records, restore and force delete functions
 - **Optimistic Lock Support**: Configurable version fields, automatic concurrent conflict detection, prevents data overwriting
+
+## Performance Benchmark
+
+DBKit outperforms GORM in most CRUD operations, with **15.1% better overall performance**.
+
+MySQL-based performance test results (using separate tables to eliminate cache effects):
+
+| Test | DBKit | GORM | Comparison |
+|------|-------|------|------------|
+| Single Insert | 440 ops/s | 356 ops/s | **DBKit 18.9% faster** |
+| Batch Insert | 26,913 ops/s | 28,284 ops/s | GORM 4.8% faster |
+| Single Query | 1,628 ops/s | 1,584 ops/s | **DBKit 2.7% faster** |
+| Batch Query (100 rows) | 1,401 ops/s | 999 ops/s | **DBKit 28.7% faster** |
+| Conditional Query | 1,413 ops/s | 1,409 ops/s | **DBKit 0.3% faster** |
+| Update | 430 ops/s | 357 ops/s | **DBKit 17.1% faster** |
+| Delete | 432 ops/s | 355 ops/s | **DBKit 17.9% faster** |
+| **Total** | **6.03s** | **7.09s** | **DBKit 15.1% faster** |
+
+**Key Advantages:**
+- ✅ Batch query 28.7% faster (biggest advantage)
+- ✅ Single insert 18.9% faster, delete 17.9% faster
+- ✅ Update 17.1% faster
+- ✅ Leads in 6 out of 7 test categories
+- ✅ Record mode has no reflection overhead, excellent query performance
+
+📊 **[View Full Performance Report](examples/benchmark/benchmark_report.md)**
+
+**Test Methodology:**
+- Separate tables (`benchmark_users_dbkit` and `benchmark_users_gorm`) to eliminate MySQL cache effects
+- Same test conditions: data volume, batch size, test iterations
+- Both use transactions for batch insert to ensure fair comparison
+- Full benchmark code available in [examples/benchmark/](examples/benchmark/)
+
+## Performance Optimization
+
+DBKit disables timestamp auto-update and optimistic lock checks by default for optimal performance. To enable:
+
+```go
+// Enable timestamp auto-update
+dbkit.EnableTimestampCheck()
+
+// Enable optimistic lock check
+dbkit.EnableOptimisticLockCheck()
+
+// Enable both features
+dbkit.EnableFeatureChecks()
+```
 
 ## Installation
 
@@ -431,7 +480,52 @@ dbkit.CacheDelete("my_store", "key1")
 dbkit.CacheClear("my_store")
 ```
 
-### 6. Soft Delete
+### 6. Auto Timestamps
+
+Auto timestamps automatically populate timestamp fields on insert and update operations without manual setting.
+
+**Performance Note**: DBKit disables auto timestamp checks by default for optimal performance. Enable it when needed:
+
+```go
+// Enable timestamp auto-update
+dbkit.EnableTimestampCheck()
+```
+
+**Configuration:**
+```go
+// Configure auto timestamps (default fields: created_at and updated_at)
+dbkit.ConfigTimestamps("users")
+
+// Use custom field names
+dbkit.ConfigTimestampsWithFields("orders", "create_time", "update_time")
+
+// Configure only created_at
+dbkit.ConfigCreatedAt("logs", "log_time")
+
+// Configure only updated_at
+dbkit.ConfigUpdatedAt("cache_data", "last_modified")
+```
+
+**Behavior:**
+```go
+// Insert: created_at auto-filled with current time
+record := dbkit.NewRecord().Set("name", "John")
+dbkit.Insert("users", record)
+
+// Update: updated_at auto-filled with current time
+updateRecord := dbkit.NewRecord().Set("name", "John Updated")
+dbkit.Update("users", updateRecord, "id = ?", 1)
+
+// Manual created_at (won't be overwritten)
+customTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+record2 := dbkit.NewRecord().Set("name", "Jane").Set("created_at", customTime)
+dbkit.Insert("users", record2)
+
+// Temporarily disable auto timestamps
+dbkit.Table("users").Where("id = ?", 1).WithoutTimestamps().Update(record)
+```
+
+### 7. Soft Delete
 
 ```go
 // Configure soft delete
@@ -453,7 +547,7 @@ dbkit.Restore("users", "id = ?", 1)
 dbkit.ForceDelete("users", "id = ?", 1)
 ```
 
-### 7. Optimistic Lock
+### 8. Optimistic Lock
 
 Optimistic lock detects concurrent update conflicts through version fields, preventing data from being accidentally overwritten.
 
@@ -493,7 +587,7 @@ updateRecord2.Set("price", 799.99)
 dbkit.Update("products", updateRecord2, "id = ?", 1)
 ```
 
-### 8. Logging Configuration
+### 9. Logging Configuration
 
 ```go
 // Enable debug mode
@@ -507,7 +601,7 @@ dbkit.InitLoggerWithFile("debug", logFile)
 dbkit.SetLogger(myCustomLogger)
 ```
 
-### 9. Connection Pool Configuration
+### 10. Connection Pool Configuration
 
 ```go
 config := &dbkit.Config{

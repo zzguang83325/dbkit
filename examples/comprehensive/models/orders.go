@@ -7,8 +7,7 @@ import (
 
 // Order represents the orders table
 type Order struct {
-	cacheName string
-	cacheTTL  time.Duration
+	dbkit.ModelCache
 	ID int64 `column:"id" json:"id"`
 	UserID int64 `column:"user_id" json:"user_id"`
 	Amount float64 `column:"amount" json:"amount"`
@@ -28,12 +27,7 @@ func (m *Order) DatabaseName() string {
 
 // Cache sets the cache name and TTL for the next query
 func (m *Order) Cache(name string, ttl ...time.Duration) *Order {
-	m.cacheName = name
-	if len(ttl) > 0 {
-		m.cacheTTL = ttl[0]
-	} else {
-		m.cacheTTL = -1
-	}
+	m.SetCache(name, ttl...)
 	return m
 }
 
@@ -44,58 +38,56 @@ func (m *Order) ToJson() string {
 
 // Save saves the Order record (insert or update)
 func (m *Order) Save() (int64, error) {
-	return dbkit.Use(m.DatabaseName()).SaveDbModel(m)
+	return dbkit.SaveDbModel(m)
 }
 
 // Insert inserts the Order record
 func (m *Order) Insert() (int64, error) {
-	return dbkit.Use(m.DatabaseName()).InsertDbModel(m)
+	return dbkit.InsertDbModel(m)
 }
 
 // Update updates the Order record based on its primary key
 func (m *Order) Update() (int64, error) {
-	return dbkit.Use(m.DatabaseName()).UpdateDbModel(m)
+	return dbkit.UpdateDbModel(m)
 }
 
 // Delete deletes the Order record based on its primary key
 func (m *Order) Delete() (int64, error) {
-	return dbkit.Use(m.DatabaseName()).DeleteDbModel(m)
+	return dbkit.DeleteDbModel(m)
+}
+
+// ForceDelete performs a physical delete, bypassing soft delete
+func (m *Order) ForceDelete() (int64, error) {
+	return dbkit.ForceDeleteModel(m)
+}
+
+// Restore restores a soft-deleted record
+func (m *Order) Restore() (int64, error) {
+	return dbkit.RestoreModel(m)
 }
 
 // FindFirst finds the first Order record based on conditions
 func (m *Order) FindFirst(whereSql string, args ...interface{}) (*Order, error) {
 	result := &Order{}
-	db := dbkit.Use(m.DatabaseName())
-	if m.cacheName != "" {
-		db = db.Cache(m.cacheName, m.cacheTTL)
-	}
-	err := db.Table(m.TableName()).Where(whereSql, args...).FindFirstToDbModel(result)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
+	return dbkit.FindFirstModel(result, m.GetCache(), whereSql, args...)
 }
 
 // Find finds Order records based on conditions
 func (m *Order) Find(whereSql string, orderBySql string, args ...interface{}) ([]*Order, error) {
-	var results []*Order
-	db := dbkit.Use(m.DatabaseName())
-	if m.cacheName != "" {
-		db = db.Cache(m.cacheName, m.cacheTTL)
-	}
-	err := db.Table(m.TableName()).Where(whereSql, args...).OrderBy(orderBySql).FindToDbModel(&results)
-	return results, err
+	return dbkit.FindModel[*Order](m, m.GetCache(), whereSql, orderBySql, args...)
+}
+
+// FindWithTrashed finds Order records including soft-deleted ones
+func (m *Order) FindWithTrashed(whereSql string, orderBySql string, args ...interface{}) ([]*Order, error) {
+	return dbkit.FindModelWithTrashed[*Order](m, m.GetCache(), whereSql, orderBySql, args...)
+}
+
+// FindOnlyTrashed finds only soft-deleted Order records
+func (m *Order) FindOnlyTrashed(whereSql string, orderBySql string, args ...interface{}) ([]*Order, error) {
+	return dbkit.FindModelOnlyTrashed[*Order](m, m.GetCache(), whereSql, orderBySql, args...)
 }
 
 // Paginate paginates Order records based on conditions
 func (m *Order) Paginate(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*Order], error) {
-	db := dbkit.Use(m.DatabaseName())
-	if m.cacheName != "" {
-		db = db.Cache(m.cacheName, m.cacheTTL)
-	}
-	recordsPage, err := db.Table(m.TableName()).Where(whereSql, args...).OrderBy(orderBy).Paginate(page, pageSize)
-	if err != nil {
-		return nil, err
-	}
-	return dbkit.RecordPageToDbModelPage[*Order](recordsPage)
+	return dbkit.PaginateModel[*Order](m, m.GetCache(), page, pageSize, whereSql, orderBy, args...)
 }

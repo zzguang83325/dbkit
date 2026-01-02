@@ -83,7 +83,21 @@ func Update(table string, record *Record, whereSql string, whereArgs ...interfac
 	if err != nil {
 		return 0, err
 	}
-	return db.Update(table, record, whereSql, whereArgs...)
+	// 如果特性检查都关闭，直接使用快速路径
+	if !db.dbMgr.enableTimestampCheck && !db.dbMgr.enableOptimisticLockCheck {
+		return db.dbMgr.updateFast(db.dbMgr.getDB(), table, record, whereSql, whereArgs...)
+	}
+	return db.dbMgr.update(db.dbMgr.getDB(), table, record, whereSql, whereArgs...)
+}
+
+// UpdateFast is a lightweight update that always skips timestamp and optimistic lock checks.
+// Use this when you need maximum performance and don't need these features.
+func UpdateFast(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error) {
+	db, err := defaultDB()
+	if err != nil {
+		return 0, err
+	}
+	return db.dbMgr.updateFast(db.dbMgr.getDB(), table, record, whereSql, whereArgs...)
 }
 
 func Delete(table string, whereSql string, whereArgs ...interface{}) (int64, error) {
@@ -429,7 +443,19 @@ func (db *DB) Update(table string, record *Record, whereSql string, whereArgs ..
 	if db.lastErr != nil {
 		return 0, db.lastErr
 	}
+	// If both feature checks are disabled, use fast path directly
+	if !db.dbMgr.enableTimestampCheck && !db.dbMgr.enableOptimisticLockCheck {
+		return db.dbMgr.updateFast(db.dbMgr.getDB(), table, record, whereSql, whereArgs...)
+	}
 	return db.dbMgr.update(db.dbMgr.getDB(), table, record, whereSql, whereArgs...)
+}
+
+// UpdateFast is a lightweight update that always skips timestamp and optimistic lock checks.
+func (db *DB) UpdateFast(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error) {
+	if db.lastErr != nil {
+		return 0, db.lastErr
+	}
+	return db.dbMgr.updateFast(db.dbMgr.getDB(), table, record, whereSql, whereArgs...)
 }
 
 func (db *DB) updateWithOptions(table string, record *Record, whereSql string, skipTimestamps bool, whereArgs ...interface{}) (int64, error) {

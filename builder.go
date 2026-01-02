@@ -126,6 +126,73 @@ func (qb *QueryBuilder) OrWhere(condition string, args ...interface{}) *QueryBui
 	return qb
 }
 
+// WhereGroupFunc is a function type for building grouped conditions
+type WhereGroupFunc func(qb *QueryBuilder) *QueryBuilder
+
+// WhereGroup adds a grouped AND condition: WHERE ... AND (grouped conditions)
+func (qb *QueryBuilder) WhereGroup(fn WhereGroupFunc) *QueryBuilder {
+	if qb.lastErr != nil {
+		return qb
+	}
+	// Create a temporary QueryBuilder to collect the grouped conditions
+	tempQb := &QueryBuilder{table: qb.table, selectSql: "*"}
+	fn(tempQb)
+
+	// Build the grouped condition
+	groupedCondition := buildGroupedCondition(tempQb)
+	if groupedCondition != "" {
+		qb.whereSql = append(qb.whereSql, "("+groupedCondition+")")
+		qb.whereArgs = append(qb.whereArgs, tempQb.whereArgs...)
+		qb.whereArgs = append(qb.whereArgs, tempQb.orWhereArgs...)
+	}
+	return qb
+}
+
+// OrWhereGroup adds a grouped OR condition: WHERE ... OR (grouped conditions)
+func (qb *QueryBuilder) OrWhereGroup(fn WhereGroupFunc) *QueryBuilder {
+	if qb.lastErr != nil {
+		return qb
+	}
+	// Create a temporary QueryBuilder to collect the grouped conditions
+	tempQb := &QueryBuilder{table: qb.table, selectSql: "*"}
+	fn(tempQb)
+
+	// Build the grouped condition
+	groupedCondition := buildGroupedCondition(tempQb)
+	if groupedCondition != "" {
+		qb.orWhereSql = append(qb.orWhereSql, "("+groupedCondition+")")
+		qb.orWhereArgs = append(qb.orWhereArgs, tempQb.whereArgs...)
+		qb.orWhereArgs = append(qb.orWhereArgs, tempQb.orWhereArgs...)
+	}
+	return qb
+}
+
+// buildGroupedCondition builds the condition string from a temporary QueryBuilder
+func buildGroupedCondition(tempQb *QueryBuilder) string {
+	var parts []string
+
+	// Add AND conditions
+	if len(tempQb.whereSql) > 0 {
+		parts = append(parts, strings.Join(tempQb.whereSql, " AND "))
+	}
+
+	// Add OR conditions
+	if len(tempQb.orWhereSql) > 0 {
+		if len(parts) > 0 {
+			// If we have both AND and OR, combine them
+			andPart := parts[0]
+			orPart := strings.Join(tempQb.orWhereSql, " OR ")
+			return andPart + " OR " + orPart
+		}
+		parts = append(parts, strings.Join(tempQb.orWhereSql, " OR "))
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[0]
+}
+
 // OrderBy adds an order by clause to the query
 func (qb *QueryBuilder) OrderBy(orderBy string) *QueryBuilder {
 	qb.orderBy = orderBy

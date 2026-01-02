@@ -231,9 +231,64 @@ func Update(table string, record *Record, whereSql string, whereArgs ...interfac
 func (db *DB) Update(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error)
 func (tx *Tx) Update(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error)
 ```
-Updates records matching the condition.
+Updates records matching the condition. Supports auto-timestamp and optimistic lock features.
 
 **Returns:** Number of affected rows.
+
+**Performance Note:** DBKit disables timestamp auto-update and optimistic lock checks by default for optimal performance. To enable these features, use `EnableTimestampCheck()` or `EnableOptimisticLockCheck()`.
+
+### UpdateFast
+```go
+func UpdateFast(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error)
+func (db *DB) UpdateFast(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error)
+```
+Lightweight update that always skips timestamp and optimistic lock checks for maximum performance.
+
+**Returns:** Number of affected rows.
+
+**Use Cases:**
+
+1. **High-frequency Updates**: High-concurrency update operations requiring extreme performance
+   ```go
+   // Game server updating player scores
+   record := dbkit.NewRecord().Set("score", newScore)
+   dbkit.UpdateFast("players", record, "id = ?", playerId)
+   ```
+
+2. **Batch Updates**: Reducing overhead when updating large amounts of data
+   ```go
+   // Batch update product inventory
+   for _, item := range items {
+       record := dbkit.NewRecord().Set("stock", item.Stock)
+       dbkit.UpdateFast("products", record, "id = ?", item.ID)
+   }
+   ```
+
+3. **Tables Without Feature Requirements**: Tables that don't need timestamp or optimistic lock features
+   ```go
+   // Update configuration table (no timestamp needed)
+   record := dbkit.NewRecord().Set("value", "new_value")
+   dbkit.UpdateFast("config", record, "key = ?", "app_version")
+   ```
+
+4. **Skip Checks When Features Enabled**: Feature checks enabled globally, but specific operations need maximum performance
+   ```go
+   // Feature checks enabled globally
+   dbkit.EnableFeatureChecks()
+   
+   // But some high-frequency operations need to skip checks
+   record := dbkit.NewRecord().Set("view_count", viewCount)
+   dbkit.UpdateFast("articles", record, "id = ?", articleId)
+   ```
+
+**Performance Comparison:**
+- When feature checks are disabled, `Update` and `UpdateFast` have the same performance
+- When feature checks are enabled, `UpdateFast` is about 2-3x faster than `Update`
+
+**Important Notes:**
+- `UpdateFast` does not automatically update the `updated_at` field
+- `UpdateFast` does not perform optimistic lock version checks
+- If you need these features, use `Update` and enable the corresponding feature checks
 
 ### UpdateRecord
 ```go
@@ -456,6 +511,24 @@ deletedUsers, _ := user.FindOnlyTrashed("", "id DESC")
 
 Auto timestamps feature automatically fills timestamp fields when inserting and updating records, without manual setting.
 
+**Performance Note:** DBKit disables auto timestamp checks by default for optimal performance. To enable, use `EnableTimestampCheck()` or `EnableFeatureChecks()`.
+
+### EnableTimestampCheck
+```go
+func EnableTimestampCheck()
+func (db *DB) EnableTimestampCheck() *DB
+```
+Enables auto timestamp check feature. When enabled, Update operations will check table timestamp configuration and automatically update the `updated_at` field.
+
+**Example:**
+```go
+// Enable timestamp check globally
+dbkit.EnableTimestampCheck()
+
+// Multi-database mode
+dbkit.Use("main").EnableTimestampCheck()
+```
+
 ### ConfigTimestamps
 ```go
 func ConfigTimestamps(table string)
@@ -604,6 +677,40 @@ dbkit.Delete("users", "id = ?", 1)
 ## Optimistic Lock
 
 Optimistic lock is a concurrency control mechanism that detects concurrent update conflicts through a version field, preventing data from being accidentally overwritten.
+
+**Performance Note:** DBKit disables optimistic lock checks by default for optimal performance. To enable, use `EnableOptimisticLockCheck()` or `EnableFeatureChecks()`.
+
+### EnableOptimisticLockCheck
+```go
+func EnableOptimisticLockCheck()
+func (db *DB) EnableOptimisticLockCheck() *DB
+```
+Enables optimistic lock check feature. When enabled, Update operations will check table optimistic lock configuration and automatically perform version checks.
+
+**Example:**
+```go
+// Enable optimistic lock check globally
+dbkit.EnableOptimisticLockCheck()
+
+// Multi-database mode
+dbkit.Use("main").EnableOptimisticLockCheck()
+```
+
+### EnableFeatureChecks
+```go
+func EnableFeatureChecks()
+func (db *DB) EnableFeatureChecks() *DB
+```
+Enables both timestamp check and optimistic lock check features.
+
+**Example:**
+```go
+// Enable all feature checks globally
+dbkit.EnableFeatureChecks()
+
+// Multi-database mode
+dbkit.Use("main").EnableFeatureChecks()
+```
 
 ### How It Works
 
@@ -935,6 +1042,8 @@ users, err := dbkit.Table("users").
     OrderBy("created_at DESC").
     Limit(10).
     Find()
+// SQL: SELECT id, name, age FROM users WHERE age > ? AND status = ? ORDER BY created_at DESC LIMIT 10
+// Args: [18, "active"]
 ```
 
 ### Join Query
@@ -950,14 +1059,16 @@ func (b *QueryBuilder) InnerJoin(table, condition string, args ...interface{}) *
 
 **Examples:**
 ```go
-// Simple JOIN
+// Simple LEFT JOIN
 records, err := dbkit.Table("users").
     Select("users.name, orders.total").
     LeftJoin("orders", "users.id = orders.user_id").
     Where("orders.status = ?", "completed").
     Find()
+// SQL: SELECT users.name, orders.total FROM users LEFT JOIN orders ON users.id = orders.user_id WHERE orders.status = ?
+// Args: ["completed"]
 
-// Multiple JOINs
+// Multiple INNER JOINs
 records, err := dbkit.Table("orders").
     Select("orders.id, users.name, products.name as product_name").
     InnerJoin("users", "orders.user_id = users.id").
@@ -966,11 +1077,19 @@ records, err := dbkit.Table("orders").
     Where("orders.status = ?", "completed").
     OrderBy("orders.created_at DESC").
     Find()
+// SQL: SELECT orders.id, users.name, products.name as product_name FROM orders 
+//      INNER JOIN users ON orders.user_id = users.id 
+//      INNER JOIN order_items ON orders.id = order_items.order_id 
+//      INNER JOIN products ON order_items.product_id = products.id 
+//      WHERE orders.status = ? ORDER BY orders.created_at DESC
+// Args: ["completed"]
 
 // JOIN with parameterized condition
 records, err := dbkit.Table("users").
     Join("orders", "users.id = orders.user_id AND orders.status = ?", "active").
     Find()
+// SQL: SELECT * FROM users JOIN orders ON users.id = orders.user_id AND orders.status = ?
+// Args: ["active"]
 ```
 
 ### Subquery
@@ -999,7 +1118,7 @@ func (b *QueryBuilder) WhereNotIn(column string, sub *Subquery) *QueryBuilder //
 
 **Examples:**
 ```go
-// Find users with orders
+// Find users with completed orders
 activeUsersSub := dbkit.NewSubquery().
     Table("orders").
     Select("DISTINCT user_id").
@@ -1009,6 +1128,8 @@ users, err := dbkit.Table("users").
     Select("*").
     WhereIn("id", activeUsersSub).
     Find()
+// SQL: SELECT * FROM users WHERE id IN (SELECT DISTINCT user_id FROM orders WHERE status = ?)
+// Args: ["completed"]
 
 // Find orders from non-banned users
 bannedUsersSub := dbkit.NewSubquery().
@@ -1019,6 +1140,8 @@ bannedUsersSub := dbkit.NewSubquery().
 orders, err := dbkit.Table("orders").
     WhereNotIn("user_id", bannedUsersSub).
     Find()
+// SQL: SELECT * FROM orders WHERE user_id NOT IN (SELECT id FROM users WHERE status = ?)
+// Args: ["banned"]
 ```
 
 #### FROM Subquery
@@ -1039,6 +1162,8 @@ records, err := (&dbkit.QueryBuilder{}).
     Select("user_id, total_spent").
     Where("total_spent > ?", 1000).
     Find()
+// SQL: SELECT user_id, total_spent FROM (SELECT user_id, SUM(total) as total_spent FROM orders) AS user_totals WHERE total_spent > ?
+// Args: [1000]
 ```
 
 #### SELECT Subquery
@@ -1059,6 +1184,8 @@ users, err := dbkit.Table("users").
     Select("users.id, users.name").
     SelectSubquery(orderCountSub, "order_count").
     Find()
+// SQL: SELECT users.id, users.name, (SELECT COUNT(*) FROM orders WHERE orders.user_id = users.id) AS order_count FROM users
+// Args: []
 ```
 
 ### Advanced WHERE Conditions
@@ -1076,7 +1203,8 @@ orders, err := dbkit.Table("orders").
     Where("status = ?", "active").
     OrWhere("priority = ?", "high").
     Find()
-// Generates: WHERE (status = ?) OR priority = ?
+// SQL: SELECT * FROM orders WHERE (status = ?) OR priority = ?
+// Args: ["active", "high"]
 
 // Multiple OR conditions
 orders, err := dbkit.Table("orders").
@@ -1084,7 +1212,53 @@ orders, err := dbkit.Table("orders").
     OrWhere("status = ?", "processing").
     OrWhere("status = ?", "shipped").
     Find()
-// Generates: WHERE status = ? OR status = ? OR status = ?
+// SQL: SELECT * FROM orders WHERE status = ? OR status = ? OR status = ?
+// Args: ["pending", "processing", "shipped"]
+```
+
+#### WhereGroup / OrWhereGroup
+```go
+type WhereGroupFunc func(qb *QueryBuilder) *QueryBuilder
+
+func (b *QueryBuilder) WhereGroup(fn WhereGroupFunc) *QueryBuilder
+func (b *QueryBuilder) OrWhereGroup(fn WhereGroupFunc) *QueryBuilder
+```
+Adds grouped conditions with nested parentheses. `WhereGroup` connects with AND, `OrWhereGroup` connects with OR.
+
+**Examples:**
+```go
+// OR grouped condition
+records, err := dbkit.Table("table").
+    Where("a = ?", 1).
+    OrWhereGroup(func(qb *dbkit.QueryBuilder) *dbkit.QueryBuilder {
+        return qb.Where("b = ?", 1).OrWhere("c = ?", 1)
+    }).
+    Find()
+// SQL: SELECT * FROM table WHERE (a = ?) OR (b = ? OR c = ?)
+// Args: [1, 1, 1]
+
+// AND grouped condition
+records, err := dbkit.Table("orders").
+    Where("status = ?", "active").
+    WhereGroup(func(qb *dbkit.QueryBuilder) *dbkit.QueryBuilder {
+        return qb.Where("type = ?", "A").OrWhere("priority = ?", "high")
+    }).
+    Find()
+// SQL: SELECT * FROM orders WHERE status = ? AND (type = ? OR priority = ?)
+// Args: ["active", "A", "high"]
+
+// Complex nesting
+records, err := dbkit.Table("table").
+    Where("a = ?", 1).
+    WhereGroup(func(outer *dbkit.QueryBuilder) *dbkit.QueryBuilder {
+        return outer.Where("b = ?", 2).
+            OrWhereGroup(func(inner *dbkit.QueryBuilder) *dbkit.QueryBuilder {
+                return inner.Where("c = ?", 3).Where("d = ?", 4)
+            })
+    }).
+    Find()
+// SQL: SELECT * FROM table WHERE a = ? AND (b = ? OR (c = ? AND d = ?))
+// Args: [1, 2, 3, 4]
 ```
 
 #### WhereInValues / WhereNotInValues
@@ -1100,13 +1274,15 @@ IN/NOT IN query with a list of values (distinct from subquery versions WhereIn/W
 users, err := dbkit.Table("users").
     WhereInValues("id", []interface{}{1, 2, 3, 4, 5}).
     Find()
-// Generates: WHERE id IN (?, ?, ?, ?, ?)
+// SQL: SELECT * FROM users WHERE id IN (?, ?, ?, ?, ?)
+// Args: [1, 2, 3, 4, 5]
 
 // Exclude orders with specific statuses
 orders, err := dbkit.Table("orders").
     WhereNotInValues("status", []interface{}{"cancelled", "refunded"}).
     Find()
-// Generates: WHERE status NOT IN (?, ?)
+// SQL: SELECT * FROM orders WHERE status NOT IN (?, ?)
+// Args: ["cancelled", "refunded"]
 ```
 
 #### WhereBetween / WhereNotBetween
@@ -1122,18 +1298,22 @@ Range queries.
 users, err := dbkit.Table("users").
     WhereBetween("age", 18, 65).
     Find()
-// Generates: WHERE age BETWEEN ? AND ?
+// SQL: SELECT * FROM users WHERE age BETWEEN ? AND ?
+// Args: [18, 65]
 
 // Find products with price not between 100-500
 products, err := dbkit.Table("products").
     WhereNotBetween("price", 100, 500).
     Find()
-// Generates: WHERE price NOT BETWEEN ? AND ?
+// SQL: SELECT * FROM products WHERE price NOT BETWEEN ? AND ?
+// Args: [100, 500]
 
 // Date range query
 orders, err := dbkit.Table("orders").
     WhereBetween("created_at", "2024-01-01", "2024-12-31").
     Find()
+// SQL: SELECT * FROM orders WHERE created_at BETWEEN ? AND ?
+// Args: ["2024-01-01", "2024-12-31"]
 ```
 
 #### WhereNull / WhereNotNull
@@ -1149,13 +1329,15 @@ NULL value checks.
 users, err := dbkit.Table("users").
     WhereNull("email").
     Find()
-// Generates: WHERE email IS NULL
+// SQL: SELECT * FROM users WHERE email IS NULL
+// Args: []
 
 // Find users with phone number
 users, err := dbkit.Table("users").
     WhereNotNull("phone").
     Find()
-// Generates: WHERE phone IS NOT NULL
+// SQL: SELECT * FROM users WHERE phone IS NOT NULL
+// Args: []
 ```
 
 ### Grouping and Aggregation
@@ -1179,6 +1361,8 @@ stats, err := dbkit.Table("orders").
     Select("status, COUNT(*) as count, SUM(total) as total_amount").
     GroupBy("status").
     Find()
+// SQL: SELECT status, COUNT(*) as count, SUM(total) as total_amount FROM orders GROUP BY status
+// Args: []
 
 // Find users with more than 5 orders
 users, err := dbkit.Table("orders").
@@ -1186,6 +1370,8 @@ users, err := dbkit.Table("orders").
     GroupBy("user_id").
     Having("COUNT(*) > ?", 5).
     Find()
+// SQL: SELECT user_id, COUNT(*) as order_count FROM orders GROUP BY user_id HAVING COUNT(*) > ?
+// Args: [5]
 
 // Multiple HAVING conditions
 stats, err := dbkit.Table("orders").
@@ -1194,7 +1380,8 @@ stats, err := dbkit.Table("orders").
     Having("COUNT(*) > ?", 3).
     Having("SUM(total) > ?", 1000).
     Find()
-// Generates: HAVING COUNT(*) > ? AND SUM(total) > ?
+// SQL: SELECT user_id, COUNT(*) as cnt, SUM(total) as total FROM orders GROUP BY user_id HAVING COUNT(*) > ? AND SUM(total) > ?
+// Args: [3, 1000]
 ```
 
 ### Complex Query Example
@@ -1213,6 +1400,10 @@ results, err := dbkit.Table("orders").
     OrderBy("total_amount DESC").
     Limit(20).
     Find()
+// SQL: SELECT status, COUNT(*) as cnt, SUM(total) as total_amount FROM orders 
+//      WHERE (created_at > ? AND active = ? AND type IN (?, ?, ?) AND customer_id IS NOT NULL) OR priority = ? 
+//      GROUP BY status HAVING COUNT(*) > ? ORDER BY total_amount DESC LIMIT 20
+// Args: ["2024-01-01", 1, "A", "B", "C", "high", 10]
 ```
 
 ---

@@ -138,6 +138,9 @@ type dbManager struct {
 	softDeletes     *softDeleteRegistry     // Soft delete configurations
 	timestamps      *timestampRegistry      // Auto timestamp configurations
 	optimisticLocks *optimisticLockRegistry // Optimistic lock configurations
+	// Feature flags
+	enableTimestampCheck      bool // Enable auto timestamp check in Update (default: false)
+	enableOptimisticLockCheck bool // Enable optimistic lock check in Update (default: false)
 }
 
 // MultiDBManager manages multiple database connections
@@ -800,20 +803,17 @@ func (mgr *dbManager) save(executor sqlExecutor, table string, record *Record) (
 	return mgr.insert(executor, table, record)
 }
 
-// getOrderedColumns returns sorted column names and their corresponding values from a record
+// getOrderedColumns returns column names and their corresponding values from a record
+// Note: columns are not sorted for better performance. SQL execution is not affected by column order.
 func (mgr *dbManager) getOrderedColumns(record *Record) ([]string, []interface{}) {
 	if record == nil || len(record.columns) == 0 {
 		return nil, nil
 	}
 	columns := make([]string, 0, len(record.columns))
-	for col := range record.columns {
+	values := make([]interface{}, 0, len(record.columns))
+	for col, val := range record.columns {
 		columns = append(columns, col)
-	}
-	sort.Strings(columns)
-
-	values := make([]interface{}, len(columns))
-	for i, col := range columns {
-		values[i] = record.columns[col]
+		values = append(values, val)
 	}
 	return columns, values
 }
@@ -1173,7 +1173,48 @@ func (mgr *dbManager) insertWithOptions(executor sqlExecutor, table string, reco
 }
 
 func (mgr *dbManager) update(executor sqlExecutor, table string, record *Record, where string, whereArgs ...interface{}) (int64, error) {
+	// If both feature checks are disabled, use fast path
+	if !mgr.enableTimestampCheck && !mgr.enableOptimisticLockCheck {
+		return mgr.updateFast(executor, table, record, where, whereArgs...)
+	}
+	// Feature checks enabled, use full path
 	return mgr.updateWithOptions(executor, table, record, where, false, whereArgs...)
+}
+
+// updateFast is a lightweight update that skips timestamp and optimistic lock checks for better performance
+func (mgr *dbManager) updateFast(executor sqlExecutor, table string, record *Record, where string, whereArgs ...interface{}) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
+	if record == nil || len(record.columns) == 0 {
+		return 0, fmt.Errorf("record is empty")
+	}
+
+	columns, values := mgr.getOrderedColumns(record)
+	var setClauses []string
+	for _, col := range columns {
+		setClauses = append(setClauses, fmt.Sprintf("%s = ?", col))
+	}
+
+	values = append(values, whereArgs...)
+
+	var querySQL string
+	if where != "" {
+		querySQL = fmt.Sprintf("UPDATE %s SET %s WHERE %s", table, joinStrings(setClauses), where)
+	} else {
+		querySQL = fmt.Sprintf("UPDATE %s SET %s", table, joinStrings(setClauses))
+	}
+
+	querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
+	values = mgr.sanitizeArgs(querySQL, values)
+	start := time.Now()
+	result, err := executor.Exec(querySQL, values...)
+	mgr.logTrace(start, querySQL, values, err)
+	if err != nil {
+		return 0, err
+	}
+
+	return result.RowsAffected()
 }
 
 func (mgr *dbManager) updateWithOptions(executor sqlExecutor, table string, record *Record, where string, skipTimestamps bool, whereArgs ...interface{}) (int64, error) {
@@ -1184,20 +1225,25 @@ func (mgr *dbManager) updateWithOptions(executor sqlExecutor, table string, reco
 		return 0, fmt.Errorf("record is empty")
 	}
 
-	// Apply updated_at timestamp
-	mgr.applyUpdatedAtTimestamp(table, record, skipTimestamps)
+	// Apply updated_at timestamp (only if feature is enabled)
+	if mgr.enableTimestampCheck {
+		mgr.applyUpdatedAtTimestamp(table, record, skipTimestamps)
+	}
 
-	// Check for optimistic lock
+	// Check for optimistic lock (only if feature is enabled)
 	versionChecked := false
 	var currentVersion int64
-	config := mgr.getOptimisticLockConfig(table)
-	if config != nil && config.VersionField != "" {
-		if ver, ok := mgr.getVersionFromRecord(table, record); ok {
-			currentVersion = ver
-			versionChecked = true
-			// Remove version from record so it's not in the regular SET clause
-			// We'll add it separately with increment
-			record.Remove(config.VersionField)
+	var config *OptimisticLockConfig
+	if mgr.enableOptimisticLockCheck {
+		config = mgr.getOptimisticLockConfig(table)
+		if config != nil && config.VersionField != "" {
+			if ver, ok := mgr.getVersionFromRecord(table, record); ok {
+				currentVersion = ver
+				versionChecked = true
+				// Remove version from record so it's not in the regular SET clause
+				// We'll add it separately with increment
+				record.Remove(config.VersionField)
+			}
 		}
 	}
 
@@ -2239,6 +2285,73 @@ func GetCurrentDBName() string {
 	defer multiMgr.mu.RUnlock()
 
 	return multiMgr.currentDB
+}
+
+// EnableTimestampCheck enables auto timestamp check in Update operations.
+// When enabled, Update will check and apply auto timestamp configurations.
+// Default is false (disabled) for better performance.
+func EnableTimestampCheck() {
+	mgr, err := defaultDB()
+	if err != nil {
+		return
+	}
+	mgr.dbMgr.mu.Lock()
+	defer mgr.dbMgr.mu.Unlock()
+	mgr.dbMgr.enableTimestampCheck = true
+}
+
+// EnableTimestampCheck enables auto timestamp check for this database instance.
+func (db *DB) EnableTimestampCheck() *DB {
+	if db.lastErr != nil {
+		return db
+	}
+	db.dbMgr.mu.Lock()
+	defer db.dbMgr.mu.Unlock()
+	db.dbMgr.enableTimestampCheck = true
+	return db
+}
+
+// EnableOptimisticLockCheck enables optimistic lock check in Update operations.
+// When enabled, Update will check and apply optimistic lock configurations.
+// Default is false (disabled) for better performance.
+func EnableOptimisticLockCheck() {
+	mgr, err := defaultDB()
+	if err != nil {
+		return
+	}
+	mgr.dbMgr.mu.Lock()
+	defer mgr.dbMgr.mu.Unlock()
+	mgr.dbMgr.enableOptimisticLockCheck = true
+}
+
+// EnableOptimisticLockCheck enables optimistic lock check for this database instance.
+func (db *DB) EnableOptimisticLockCheck() *DB {
+	if db.lastErr != nil {
+		return db
+	}
+	db.dbMgr.mu.Lock()
+	defer db.dbMgr.mu.Unlock()
+	db.dbMgr.enableOptimisticLockCheck = true
+	return db
+}
+
+// EnableFeatureChecks enables both timestamp and optimistic lock checks.
+// This is a convenience function to enable all feature checks at once.
+func EnableFeatureChecks() {
+	EnableTimestampCheck()
+	EnableOptimisticLockCheck()
+}
+
+// EnableFeatureChecks enables both timestamp and optimistic lock checks for this database instance.
+func (db *DB) EnableFeatureChecks() *DB {
+	if db.lastErr != nil {
+		return db
+	}
+	db.dbMgr.mu.Lock()
+	defer db.dbMgr.mu.Unlock()
+	db.dbMgr.enableTimestampCheck = true
+	db.dbMgr.enableOptimisticLockCheck = true
+	return db
 }
 
 // initDB initializes the database connection

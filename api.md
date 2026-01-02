@@ -319,6 +319,61 @@ func (tx *Tx) Update(table string, record *Record, whereSql string, whereArgs ..
 
 **返回值:** 影响的行数。
 
+**性能说明:** DBKit 默认关闭了时间戳自动更新和乐观锁检查功能，以获得最佳性能。如需启用这些功能，请使用 `EnableTimestampCheck()` 或 `EnableOptimisticLockCheck()`。
+
+### UpdateFast
+```go
+func UpdateFast(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error)
+func (db *DB) UpdateFast(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error)
+```
+轻量级更新，始终跳过时间戳和乐观锁检查，提供最佳性能。
+
+**返回值:** 影响的行数。
+
+**使用场景:**
+
+1. **高频更新场景**: 需要极致性能的高并发更新操作
+   ```go
+   // 游戏服务器更新玩家积分
+   record := dbkit.NewRecord().Set("score", newScore)
+   dbkit.UpdateFast("players", record, "id = ?", playerId)
+   ```
+
+2. **批量更新**: 大量数据更新时减少开销
+   ```go
+   // 批量更新商品库存
+   for _, item := range items {
+       record := dbkit.NewRecord().Set("stock", item.Stock)
+       dbkit.UpdateFast("products", record, "id = ?", item.ID)
+   }
+   ```
+
+3. **无需特性检查的表**: 表本身不需要时间戳或乐观锁功能
+   ```go
+   // 更新配置表（不需要时间戳）
+   record := dbkit.NewRecord().Set("value", "new_value")
+   dbkit.UpdateFast("config", record, "key = ?", "app_version")
+   ```
+
+4. **已启用特性检查但某些操作需要跳过**: 全局启用了特性检查，但特定操作需要最大性能
+   ```go
+   // 全局启用了特性检查
+   dbkit.EnableFeatureChecks()
+   
+   // 但某些高频操作需要跳过检查
+   record := dbkit.NewRecord().Set("view_count", viewCount)
+   dbkit.UpdateFast("articles", record, "id = ?", articleId)
+   ```
+
+**性能对比:**
+- 当特性检查关闭时，`Update` 和 `UpdateFast` 性能相同
+- 当特性检查启用时，`UpdateFast` 比 `Update` 快约 2-3 倍
+
+**注意事项:**
+- `UpdateFast` 不会自动更新 `updated_at` 字段
+- `UpdateFast` 不会进行乐观锁版本检查
+- 如果需要这些功能，请使用 `Update` 并启用相应的特性检查
+
 ### UpdateRecord
 ```go
 func (db *DB) UpdateRecord(table string, record *Record) (int64, error)
@@ -540,6 +595,24 @@ deletedUsers, _ := user.FindOnlyTrashed("", "id DESC")
 
 自动时间戳功能允许在插入和更新记录时自动填充时间戳字段，无需手动设置。
 
+**性能说明:** DBKit 默认关闭自动时间戳检查功能以获得最佳性能。如需启用，请使用 `EnableTimestampCheck()` 或 `EnableFeatureChecks()`。
+
+### EnableTimestampCheck
+```go
+func EnableTimestampCheck()
+func (db *DB) EnableTimestampCheck() *DB
+```
+启用自动时间戳检查功能。启用后，Update 操作会检查表的时间戳配置并自动更新 `updated_at` 字段。
+
+**示例:**
+```go
+// 全局启用时间戳检查
+dbkit.EnableTimestampCheck()
+
+// 多数据库模式
+dbkit.Use("main").EnableTimestampCheck()
+```
+
 ### ConfigTimestamps
 ```go
 func ConfigTimestamps(table string)
@@ -688,6 +761,40 @@ dbkit.Delete("users", "id = ?", 1)
 ## 乐观锁
 
 乐观锁是一种并发控制机制，通过版本号字段检测并发更新冲突，防止数据被意外覆盖。
+
+**性能说明:** DBKit 默认关闭乐观锁检查功能以获得最佳性能。如需启用，请使用 `EnableOptimisticLockCheck()` 或 `EnableFeatureChecks()`。
+
+### EnableOptimisticLockCheck
+```go
+func EnableOptimisticLockCheck()
+func (db *DB) EnableOptimisticLockCheck() *DB
+```
+启用乐观锁检查功能。启用后，Update 操作会检查表的乐观锁配置并自动进行版本检查。
+
+**示例:**
+```go
+// 全局启用乐观锁检查
+dbkit.EnableOptimisticLockCheck()
+
+// 多数据库模式
+dbkit.Use("main").EnableOptimisticLockCheck()
+```
+
+### EnableFeatureChecks
+```go
+func EnableFeatureChecks()
+func (db *DB) EnableFeatureChecks() *DB
+```
+同时启用时间戳检查和乐观锁检查功能。
+
+**示例:**
+```go
+// 全局启用所有特性检查
+dbkit.EnableFeatureChecks()
+
+// 多数据库模式
+dbkit.Use("main").EnableFeatureChecks()
+```
 
 ### 工作原理
 
@@ -1019,6 +1126,8 @@ users, err := dbkit.Table("users").
     OrderBy("created_at DESC").
     Limit(10).
     Find()
+// SQL: SELECT id, name, age FROM users WHERE age > ? AND status = ? ORDER BY created_at DESC LIMIT 10
+// Args: [18, "active"]
 ```
 
 ### Join 查询
@@ -1034,14 +1143,16 @@ func (b *QueryBuilder) InnerJoin(table, condition string, args ...interface{}) *
 
 **示例:**
 ```go
-// 简单 JOIN
+// 简单 LEFT JOIN
 records, err := dbkit.Table("users").
     Select("users.name, orders.total").
     LeftJoin("orders", "users.id = orders.user_id").
     Where("orders.status = ?", "completed").
     Find()
+// SQL: SELECT users.name, orders.total FROM users LEFT JOIN orders ON users.id = orders.user_id WHERE orders.status = ?
+// Args: ["completed"]
 
-// 多表 JOIN
+// 多表 INNER JOIN
 records, err := dbkit.Table("orders").
     Select("orders.id, users.name, products.name as product_name").
     InnerJoin("users", "orders.user_id = users.id").
@@ -1050,11 +1161,19 @@ records, err := dbkit.Table("orders").
     Where("orders.status = ?", "completed").
     OrderBy("orders.created_at DESC").
     Find()
+// SQL: SELECT orders.id, users.name, products.name as product_name FROM orders 
+//      INNER JOIN users ON orders.user_id = users.id 
+//      INNER JOIN order_items ON orders.id = order_items.order_id 
+//      INNER JOIN products ON order_items.product_id = products.id 
+//      WHERE orders.status = ? ORDER BY orders.created_at DESC
+// Args: ["completed"]
 
 // 带参数的 JOIN 条件
 records, err := dbkit.Table("users").
     Join("orders", "users.id = orders.user_id AND orders.status = ?", "active").
     Find()
+// SQL: SELECT * FROM users JOIN orders ON users.id = orders.user_id AND orders.status = ?
+// Args: ["active"]
 ```
 
 ### 子查询 (Subquery)
@@ -1083,7 +1202,7 @@ func (b *QueryBuilder) WhereNotIn(column string, sub *Subquery) *QueryBuilder //
 
 **示例:**
 ```go
-// 查询有订单的用户
+// 查询有已完成订单的用户
 activeUsersSub := dbkit.NewSubquery().
     Table("orders").
     Select("DISTINCT user_id").
@@ -1093,6 +1212,8 @@ users, err := dbkit.Table("users").
     Select("*").
     WhereIn("id", activeUsersSub).
     Find()
+// SQL: SELECT * FROM users WHERE id IN (SELECT DISTINCT user_id FROM orders WHERE status = ?)
+// Args: ["completed"]
 
 // 查询没有被禁用的用户的订单
 bannedUsersSub := dbkit.NewSubquery().
@@ -1103,6 +1224,8 @@ bannedUsersSub := dbkit.NewSubquery().
 orders, err := dbkit.Table("orders").
     WhereNotIn("user_id", bannedUsersSub).
     Find()
+// SQL: SELECT * FROM orders WHERE user_id NOT IN (SELECT id FROM users WHERE status = ?)
+// Args: ["banned"]
 ```
 
 #### FROM 子查询
@@ -1123,6 +1246,8 @@ records, err := (&dbkit.QueryBuilder{}).
     Select("user_id, total_spent").
     Where("total_spent > ?", 1000).
     Find()
+// SQL: SELECT user_id, total_spent FROM (SELECT user_id, SUM(total) as total_spent FROM orders) AS user_totals WHERE total_spent > ?
+// Args: [1000]
 ```
 
 #### SELECT 子查询
@@ -1143,6 +1268,8 @@ users, err := dbkit.Table("users").
     Select("users.id, users.name").
     SelectSubquery(orderCountSub, "order_count").
     Find()
+// SQL: SELECT users.id, users.name, (SELECT COUNT(*) FROM orders WHERE orders.user_id = users.id) AS order_count FROM users
+// Args: []
 ```
 
 ### 高级 WHERE 条件
@@ -1160,7 +1287,8 @@ orders, err := dbkit.Table("orders").
     Where("status = ?", "active").
     OrWhere("priority = ?", "high").
     Find()
-// 生成: WHERE (status = ?) OR priority = ?
+// SQL: SELECT * FROM orders WHERE (status = ?) OR priority = ?
+// Args: ["active", "high"]
 
 // 多个 OR 条件
 orders, err := dbkit.Table("orders").
@@ -1168,7 +1296,53 @@ orders, err := dbkit.Table("orders").
     OrWhere("status = ?", "processing").
     OrWhere("status = ?", "shipped").
     Find()
-// 生成: WHERE status = ? OR status = ? OR status = ?
+// SQL: SELECT * FROM orders WHERE status = ? OR status = ? OR status = ?
+// Args: ["pending", "processing", "shipped"]
+```
+
+#### WhereGroup / OrWhereGroup
+```go
+type WhereGroupFunc func(qb *QueryBuilder) *QueryBuilder
+
+func (b *QueryBuilder) WhereGroup(fn WhereGroupFunc) *QueryBuilder
+func (b *QueryBuilder) OrWhereGroup(fn WhereGroupFunc) *QueryBuilder
+```
+添加分组条件，支持嵌套括号。`WhereGroup` 使用 AND 连接，`OrWhereGroup` 使用 OR 连接。
+
+**示例:**
+```go
+// OR 分组条件
+records, err := dbkit.Table("table").
+    Where("a = ?", 1).
+    OrWhereGroup(func(qb *dbkit.QueryBuilder) *dbkit.QueryBuilder {
+        return qb.Where("b = ?", 1).OrWhere("c = ?", 1)
+    }).
+    Find()
+// SQL: SELECT * FROM table WHERE (a = ?) OR (b = ? OR c = ?)
+// Args: [1, 1, 1]
+
+// AND 分组条件
+records, err := dbkit.Table("orders").
+    Where("status = ?", "active").
+    WhereGroup(func(qb *dbkit.QueryBuilder) *dbkit.QueryBuilder {
+        return qb.Where("type = ?", "A").OrWhere("priority = ?", "high")
+    }).
+    Find()
+// SQL: SELECT * FROM orders WHERE status = ? AND (type = ? OR priority = ?)
+// Args: ["active", "A", "high"]
+
+// 复杂嵌套
+records, err := dbkit.Table("table").
+    Where("a = ?", 1).
+    WhereGroup(func(outer *dbkit.QueryBuilder) *dbkit.QueryBuilder {
+        return outer.Where("b = ?", 2).
+            OrWhereGroup(func(inner *dbkit.QueryBuilder) *dbkit.QueryBuilder {
+                return inner.Where("c = ?", 3).Where("d = ?", 4)
+            })
+    }).
+    Find()
+// SQL: SELECT * FROM table WHERE a = ? AND (b = ? OR (c = ? AND d = ?))
+// Args: [1, 2, 3, 4]
 ```
 
 #### WhereInValues / WhereNotInValues
@@ -1184,13 +1358,15 @@ func (b *QueryBuilder) WhereNotInValues(column string, values []interface{}) *Qu
 users, err := dbkit.Table("users").
     WhereInValues("id", []interface{}{1, 2, 3, 4, 5}).
     Find()
-// 生成: WHERE id IN (?, ?, ?, ?, ?)
+// SQL: SELECT * FROM users WHERE id IN (?, ?, ?, ?, ?)
+// Args: [1, 2, 3, 4, 5]
 
 // 排除指定状态的订单
 orders, err := dbkit.Table("orders").
     WhereNotInValues("status", []interface{}{"cancelled", "refunded"}).
     Find()
-// 生成: WHERE status NOT IN (?, ?)
+// SQL: SELECT * FROM orders WHERE status NOT IN (?, ?)
+// Args: ["cancelled", "refunded"]
 ```
 
 #### WhereBetween / WhereNotBetween
@@ -1206,18 +1382,22 @@ func (b *QueryBuilder) WhereNotBetween(column string, min, max interface{}) *Que
 users, err := dbkit.Table("users").
     WhereBetween("age", 18, 65).
     Find()
-// 生成: WHERE age BETWEEN ? AND ?
+// SQL: SELECT * FROM users WHERE age BETWEEN ? AND ?
+// Args: [18, 65]
 
 // 查询价格不在 100-500 之间的产品
 products, err := dbkit.Table("products").
     WhereNotBetween("price", 100, 500).
     Find()
-// 生成: WHERE price NOT BETWEEN ? AND ?
+// SQL: SELECT * FROM products WHERE price NOT BETWEEN ? AND ?
+// Args: [100, 500]
 
 // 日期范围查询
 orders, err := dbkit.Table("orders").
     WhereBetween("created_at", "2024-01-01", "2024-12-31").
     Find()
+// SQL: SELECT * FROM orders WHERE created_at BETWEEN ? AND ?
+// Args: ["2024-01-01", "2024-12-31"]
 ```
 
 #### WhereNull / WhereNotNull
@@ -1233,13 +1413,15 @@ NULL 值检查。
 users, err := dbkit.Table("users").
     WhereNull("email").
     Find()
-// 生成: WHERE email IS NULL
+// SQL: SELECT * FROM users WHERE email IS NULL
+// Args: []
 
 // 查询有手机号的用户
 users, err := dbkit.Table("users").
     WhereNotNull("phone").
     Find()
-// 生成: WHERE phone IS NOT NULL
+// SQL: SELECT * FROM users WHERE phone IS NOT NULL
+// Args: []
 ```
 
 ### 分组和聚合
@@ -1263,6 +1445,8 @@ stats, err := dbkit.Table("orders").
     Select("status, COUNT(*) as count, SUM(total) as total_amount").
     GroupBy("status").
     Find()
+// SQL: SELECT status, COUNT(*) as count, SUM(total) as total_amount FROM orders GROUP BY status
+// Args: []
 
 // 查询订单数大于 5 的用户
 users, err := dbkit.Table("orders").
@@ -1270,6 +1454,8 @@ users, err := dbkit.Table("orders").
     GroupBy("user_id").
     Having("COUNT(*) > ?", 5).
     Find()
+// SQL: SELECT user_id, COUNT(*) as order_count FROM orders GROUP BY user_id HAVING COUNT(*) > ?
+// Args: [5]
 
 // 多个 HAVING 条件
 stats, err := dbkit.Table("orders").
@@ -1278,7 +1464,8 @@ stats, err := dbkit.Table("orders").
     Having("COUNT(*) > ?", 3).
     Having("SUM(total) > ?", 1000).
     Find()
-// 生成: HAVING COUNT(*) > ? AND SUM(total) > ?
+// SQL: SELECT user_id, COUNT(*) as cnt, SUM(total) as total FROM orders GROUP BY user_id HAVING COUNT(*) > ? AND SUM(total) > ?
+// Args: [3, 1000]
 ```
 
 ### 复杂查询示例
@@ -1297,6 +1484,10 @@ results, err := dbkit.Table("orders").
     OrderBy("total_amount DESC").
     Limit(20).
     Find()
+// SQL: SELECT status, COUNT(*) as cnt, SUM(total) as total_amount FROM orders 
+//      WHERE (created_at > ? AND active = ? AND type IN (?, ?, ?) AND customer_id IS NOT NULL) OR priority = ? 
+//      GROUP BY status HAVING COUNT(*) > ? ORDER BY total_amount DESC LIMIT 20
+// Args: ["2024-01-01", 1, "A", "B", "C", "high", 10]
 ```
 
 ---
