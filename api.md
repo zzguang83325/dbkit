@@ -319,7 +319,7 @@ func (tx *Tx) Update(table string, record *Record, whereSql string, whereArgs ..
 
 **返回值:** 影响的行数。
 
-**性能说明:** DBKit 默认关闭了时间戳自动更新和乐观锁检查功能，以获得最佳性能。如需启用这些功能，请使用 `EnableTimestampCheck()` 或 `EnableOptimisticLockCheck()`。
+**性能说明:** DBKit 默认关闭了时间戳自动更新和乐观锁功能，以获得最佳性能。如需启用这些功能，请使用 `EnableTimestamps()` 或 `EnableOptimisticLock()`。
 
 ### UpdateFast
 ```go
@@ -424,27 +424,27 @@ func (tx *Tx) DeleteRecord(table string, record *Record) (int64, error)
 
 软删除允许删除记录时只标记为已删除而非物理删除，便于数据恢复和审计。
 
-**性能说明**: DBKit 默认关闭软删除检查以获得最佳性能。如需使用此功能，请先启用：
+**性能说明**: DBKit 默认关闭软删除功能以获得最佳性能。如需使用此功能，请先启用：
 
 ```go
-// 启用软删除检查
-dbkit.EnableSoftDeleteCheck()
+// 启用软删除功能
+dbkit.EnableSoftDelete()
 ```
 
-### EnableSoftDeleteCheck
+### EnableSoftDelete
 ```go
-func EnableSoftDeleteCheck()
-func (db *DB) EnableSoftDeleteCheck() *DB
+func EnableSoftDelete()
+func (db *DB) EnableSoftDelete() *DB
 ```
-启用软删除检查功能。启用后，查询操作会自动过滤已软删除的记录。
+启用软删除功能。启用后，查询操作会自动过滤已软删除的记录。
 
 **示例:**
 ```go
-// 全局启用软删除检查
-dbkit.EnableSoftDeleteCheck()
+// 全局启用软删除功能
+dbkit.EnableSoftDelete()
 
 // 多数据库模式
-dbkit.Use("main").EnableSoftDeleteCheck()
+dbkit.Use("main").EnableSoftDelete()
 ```
 
 ### 软删除类型
@@ -618,22 +618,22 @@ deletedUsers, _ := user.FindOnlyTrashed("", "id DESC")
 
 自动时间戳功能允许在插入和更新记录时自动填充时间戳字段，无需手动设置。
 
-**性能说明:** DBKit 默认关闭自动时间戳检查功能以获得最佳性能。如需启用，请使用 `EnableTimestampCheck()` 或 `EnableFeatureChecks()`。
+**性能说明:** DBKit 默认关闭自动时间戳功能以获得最佳性能。如需启用，请使用 `EnableTimestamps()` 或 `EnableFeatureChecks()`。
 
-### EnableTimestampCheck
+### EnableTimestamps
 ```go
-func EnableTimestampCheck()
-func (db *DB) EnableTimestampCheck() *DB
+func EnableTimestamps()
+func (db *DB) EnableTimestamps() *DB
 ```
-启用自动时间戳检查功能。启用后，Update 操作会检查表的时间戳配置并自动更新 `updated_at` 字段。
+启用自动时间戳功能。启用后，Update 操作会检查表的时间戳配置并自动更新 `updated_at` 字段。
 
 **示例:**
 ```go
-// 全局启用时间戳检查
-dbkit.EnableTimestampCheck()
+// 全局启用时间戳自动更新
+dbkit.EnableTimestamps()
 
 // 多数据库模式
-dbkit.Use("main").EnableTimestampCheck()
+dbkit.Use("main").EnableTimestamps()
 ```
 
 ### ConfigTimestamps
@@ -785,22 +785,22 @@ dbkit.Delete("users", "id = ?", 1)
 
 乐观锁是一种并发控制机制，通过版本号字段检测并发更新冲突，防止数据被意外覆盖。
 
-**性能说明:** DBKit 默认关闭乐观锁检查功能以获得最佳性能。如需启用，请使用 `EnableOptimisticLockCheck()` 或 `EnableFeatureChecks()`。
+**性能说明:** DBKit 默认关闭乐观锁功能以获得最佳性能。如需启用，请使用 `EnableOptimisticLock()` 或 `EnableFeatureChecks()`。
 
-### EnableOptimisticLockCheck
+### EnableOptimisticLock
 ```go
-func EnableOptimisticLockCheck()
-func (db *DB) EnableOptimisticLockCheck() *DB
+func EnableOptimisticLock()
+func (db *DB) EnableOptimisticLock() *DB
 ```
-启用乐观锁检查功能。启用后，Update 操作会检查表的乐观锁配置并自动进行版本检查。
+启用乐观锁功能。启用后，Update 操作会检查表的乐观锁配置并自动进行版本检查。
 
 **示例:**
 ```go
-// 全局启用乐观锁检查
-dbkit.EnableOptimisticLockCheck()
+// 全局启用乐观锁功能
+dbkit.EnableOptimisticLock()
 
 // 多数据库模式
-dbkit.Use("main").EnableOptimisticLockCheck()
+dbkit.Use("main").EnableOptimisticLock()
 ```
 
 ### EnableFeatureChecks

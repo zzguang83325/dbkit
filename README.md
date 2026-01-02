@@ -63,13 +63,13 @@ DBKit 默认关闭了时间戳自动更新、乐观锁检查和软删除检查�
 
 ```go
 // 启用时间戳自动更新
-dbkit.EnableTimestampCheck()
+dbkit.EnableTimestamps()
 
-// 启用乐观锁检查
-dbkit.EnableOptimisticLockCheck()
+// 启用乐观锁功能
+dbkit.EnableOptimisticLock()
 
-// 启用软删除检查
-dbkit.EnableSoftDeleteCheck()
+// 启用软删除功能
+dbkit.EnableSoftDelete()
 
 // 同时启用所有功能
 dbkit.EnableFeatureChecks()
@@ -1179,8 +1179,8 @@ users, _ := dbkit.Table("users").
 **性能说明**: DBKit 默认关闭软删除检查以获得最佳性能。如需使用此功能，请先启用：
 
 ```go
-// 启用软删除检查
-dbkit.EnableSoftDeleteCheck()
+// 启用软删除功能
+dbkit.EnableSoftDelete()
 ```
 
 #### 配置软删除

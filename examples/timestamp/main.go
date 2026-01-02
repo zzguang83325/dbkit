@@ -30,8 +30,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Enable timestamp check first
-	dbkit.EnableTimestampCheck()
+	// Enable timestamp first
+	dbkit.EnableTimestamps()
 
 	// Configure auto timestamps for users table
 	dbkit.ConfigTimestamps("users")

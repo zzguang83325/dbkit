@@ -2288,10 +2288,10 @@ func GetCurrentDBName() string {
 	return multiMgr.currentDB
 }
 
-// EnableTimestampCheck enables auto timestamp check in Update operations.
+// EnableTimestamps enables auto timestamp in Update operations.
 // When enabled, Update will check and apply auto timestamp configurations.
 // Default is false (disabled) for better performance.
-func EnableTimestampCheck() {
+func EnableTimestamps() {
 	mgr, err := defaultDB()
 	if err != nil {
 		return
@@ -2301,8 +2301,8 @@ func EnableTimestampCheck() {
 	mgr.dbMgr.enableTimestampCheck = true
 }
 
-// EnableTimestampCheck enables auto timestamp check for this database instance.
-func (db *DB) EnableTimestampCheck() *DB {
+// EnableTimestamps enables auto timestamp for this database instance.
+func (db *DB) EnableTimestamps() *DB {
 	if db.lastErr != nil {
 		return db
 	}
@@ -2312,10 +2312,20 @@ func (db *DB) EnableTimestampCheck() *DB {
 	return db
 }
 
-// EnableOptimisticLockCheck enables optimistic lock check in Update operations.
+// Deprecated: Use EnableTimestamps() instead
+func EnableTimestampCheck() {
+	EnableTimestamps()
+}
+
+// Deprecated: Use EnableTimestamps() instead
+func (db *DB) EnableTimestampCheck() *DB {
+	return db.EnableTimestamps()
+}
+
+// EnableOptimisticLock enables optimistic lock in Update operations.
 // When enabled, Update will check and apply optimistic lock configurations.
 // Default is false (disabled) for better performance.
-func EnableOptimisticLockCheck() {
+func EnableOptimisticLock() {
 	mgr, err := defaultDB()
 	if err != nil {
 		return
@@ -2325,8 +2335,8 @@ func EnableOptimisticLockCheck() {
 	mgr.dbMgr.enableOptimisticLockCheck = true
 }
 
-// EnableOptimisticLockCheck enables optimistic lock check for this database instance.
-func (db *DB) EnableOptimisticLockCheck() *DB {
+// EnableOptimisticLock enables optimistic lock for this database instance.
+func (db *DB) EnableOptimisticLock() *DB {
 	if db.lastErr != nil {
 		return db
 	}
@@ -2336,15 +2346,25 @@ func (db *DB) EnableOptimisticLockCheck() *DB {
 	return db
 }
 
-// EnableFeatureChecks enables all feature checks at once.
-// This is a convenience function to enable all feature checks at once.
-func EnableFeatureChecks() {
-	EnableTimestampCheck()
-	EnableOptimisticLockCheck()
-	EnableSoftDeleteCheck()
+// Deprecated: Use EnableOptimisticLock() instead
+func EnableOptimisticLockCheck() {
+	EnableOptimisticLock()
 }
 
-// EnableFeatureChecks enables all feature checks for this database instance.
+// Deprecated: Use EnableOptimisticLock() instead
+func (db *DB) EnableOptimisticLockCheck() *DB {
+	return db.EnableOptimisticLock()
+}
+
+// EnableFeatureChecks enables all features at once.
+// This is a convenience function to enable all features at once.
+func EnableFeatureChecks() {
+	EnableTimestamps()
+	EnableOptimisticLock()
+	EnableSoftDelete()
+}
+
+// EnableFeatureChecks enables all features for this database instance.
 func (db *DB) EnableFeatureChecks() *DB {
 	if db.lastErr != nil {
 		return db
@@ -2357,10 +2377,10 @@ func (db *DB) EnableFeatureChecks() *DB {
 	return db
 }
 
-// EnableSoftDeleteCheck enables soft delete check in query operations.
+// EnableSoftDelete enables soft delete in query operations.
 // When enabled, queries will automatically filter out soft-deleted records.
 // Default is false (disabled) for better performance.
-func EnableSoftDeleteCheck() {
+func EnableSoftDelete() {
 	mgr, err := defaultDB()
 	if err != nil {
 		return
@@ -2370,8 +2390,8 @@ func EnableSoftDeleteCheck() {
 	mgr.dbMgr.enableSoftDeleteCheck = true
 }
 
-// EnableSoftDeleteCheck enables soft delete check for this database instance.
-func (db *DB) EnableSoftDeleteCheck() *DB {
+// EnableSoftDelete enables soft delete for this database instance.
+func (db *DB) EnableSoftDelete() *DB {
 	if db.lastErr != nil {
 		return db
 	}
@@ -2379,6 +2399,16 @@ func (db *DB) EnableSoftDeleteCheck() *DB {
 	defer db.dbMgr.mu.Unlock()
 	db.dbMgr.enableSoftDeleteCheck = true
 	return db
+}
+
+// Deprecated: Use EnableSoftDelete() instead
+func EnableSoftDeleteCheck() {
+	EnableSoftDelete()
+}
+
+// Deprecated: Use EnableSoftDelete() instead
+func (db *DB) EnableSoftDeleteCheck() *DB {
+	return db.EnableSoftDelete()
 }
 
 // initDB initializes the database connection

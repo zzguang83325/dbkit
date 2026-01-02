@@ -63,13 +63,13 @@ DBKit disables timestamp auto-update, optimistic lock checks, and soft delete ch
 
 ```go
 // Enable timestamp auto-update
-dbkit.EnableTimestampCheck()
+dbkit.EnableTimestamps()
 
-// Enable optimistic lock check
-dbkit.EnableOptimisticLockCheck()
+// Enable optimistic lock
+dbkit.EnableOptimisticLock()
 
-// Enable soft delete check
-dbkit.EnableSoftDeleteCheck()
+// Enable soft delete
+dbkit.EnableSoftDelete()
 
 // Enable all features
 dbkit.EnableFeatureChecks()
@@ -491,7 +491,7 @@ Auto timestamps automatically populate timestamp fields on insert and update ope
 
 ```go
 // Enable timestamp auto-update
-dbkit.EnableTimestampCheck()
+dbkit.EnableTimestamps()
 ```
 
 **Configuration:**
@@ -533,8 +533,8 @@ dbkit.Table("users").Where("id = ?", 1).WithoutTimestamps().Update(record)
 **Performance Note**: DBKit disables soft delete checks by default for optimal performance. To enable this feature:
 
 ```go
-// Enable soft delete check
-dbkit.EnableSoftDeleteCheck()
+// Enable soft delete
+dbkit.EnableSoftDelete()
 ```
 
 ```go

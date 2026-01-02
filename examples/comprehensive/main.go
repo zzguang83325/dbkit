@@ -833,8 +833,8 @@ func prepareData() {
 func testAutoTimestamps() {
 	fmt.Println("\n[测试 11: 自动时间戳 (Auto Timestamps)]")
 
-	// 启用时间戳检查
-	dbkit.EnableTimestampCheck()
+	// 启用时间戳自动更新
+	dbkit.EnableTimestamps()
 	fmt.Println("  ✓ 已启用时间戳自动更新")
 
 	// 创建带时间戳的表
@@ -979,9 +979,9 @@ func testAutoTimestamps() {
 func testSoftDelete() {
 	fmt.Println("\n[测试 12: 软删除 (Soft Delete)]")
 
-	// 启用软删除检查
-	dbkit.EnableSoftDeleteCheck()
-	fmt.Println("  ✓ 已启用软删除检查")
+	// 启用软删除功能
+	dbkit.EnableSoftDelete()
+	fmt.Println("  ✓ 已启用软删除功能")
 
 	// 创建带软删除字段的表
 	dbkit.Exec("DROP TABLE IF EXISTS documents")
@@ -1136,9 +1136,9 @@ func testSoftDelete() {
 func testOptimisticLock() {
 	fmt.Println("\n[测试 13: 乐观锁 (Optimistic Lock)]")
 
-	// 启用乐观锁检查
-	dbkit.EnableOptimisticLockCheck()
-	fmt.Println("  ✓ 已启用乐观锁检查")
+	// 启用乐观锁功能
+	dbkit.EnableOptimisticLock()
+	fmt.Println("  ✓ 已启用乐观锁功能")
 
 	// 创建带版本字段的表
 	dbkit.Exec("DROP TABLE IF EXISTS inventory")

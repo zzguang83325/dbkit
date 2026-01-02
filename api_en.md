@@ -235,7 +235,7 @@ Updates records matching the condition. Supports auto-timestamp and optimistic l
 
 **Returns:** Number of affected rows.
 
-**Performance Note:** DBKit disables timestamp auto-update and optimistic lock checks by default for optimal performance. To enable these features, use `EnableTimestampCheck()` or `EnableOptimisticLockCheck()`.
+**Performance Note:** DBKit disables timestamp auto-update and optimistic lock by default for optimal performance. To enable these features, use `EnableTimestamps()` or `EnableOptimisticLock()`.
 
 ### UpdateFast
 ```go
@@ -340,27 +340,27 @@ Deletes a record based on its primary key.
 
 Soft delete allows marking records as deleted instead of physically removing them, enabling data recovery and auditing.
 
-**Performance Note**: DBKit disables soft delete checks by default for optimal performance. To enable this feature, use:
+**Performance Note**: DBKit disables soft delete by default for optimal performance. To enable this feature, use:
 
 ```go
-// Enable soft delete check
-dbkit.EnableSoftDeleteCheck()
+// Enable soft delete
+dbkit.EnableSoftDelete()
 ```
 
-### EnableSoftDeleteCheck
+### EnableSoftDelete
 ```go
-func EnableSoftDeleteCheck()
-func (db *DB) EnableSoftDeleteCheck() *DB
+func EnableSoftDelete()
+func (db *DB) EnableSoftDelete() *DB
 ```
-Enables soft delete check feature. When enabled, query operations will automatically filter out soft-deleted records.
+Enables soft delete feature. When enabled, query operations will automatically filter out soft-deleted records.
 
 **Example:**
 ```go
-// Enable soft delete check globally
-dbkit.EnableSoftDeleteCheck()
+// Enable soft delete globally
+dbkit.EnableSoftDelete()
 
 // Multi-database mode
-dbkit.Use("main").EnableSoftDeleteCheck()
+dbkit.Use("main").EnableSoftDelete()
 ```
 
 ### Soft Delete Types
@@ -534,22 +534,22 @@ deletedUsers, _ := user.FindOnlyTrashed("", "id DESC")
 
 Auto timestamps feature automatically fills timestamp fields when inserting and updating records, without manual setting.
 
-**Performance Note:** DBKit disables auto timestamp checks by default for optimal performance. To enable, use `EnableTimestampCheck()` or `EnableFeatureChecks()`.
+**Performance Note:** DBKit disables auto timestamp by default for optimal performance. To enable, use `EnableTimestamps()` or `EnableFeatureChecks()`.
 
-### EnableTimestampCheck
+### EnableTimestamps
 ```go
-func EnableTimestampCheck()
-func (db *DB) EnableTimestampCheck() *DB
+func EnableTimestamps()
+func (db *DB) EnableTimestamps() *DB
 ```
-Enables auto timestamp check feature. When enabled, Update operations will check table timestamp configuration and automatically update the `updated_at` field.
+Enables auto timestamp feature. When enabled, Update operations will check table timestamp configuration and automatically update the `updated_at` field.
 
 **Example:**
 ```go
-// Enable timestamp check globally
-dbkit.EnableTimestampCheck()
+// Enable timestamp globally
+dbkit.EnableTimestamps()
 
 // Multi-database mode
-dbkit.Use("main").EnableTimestampCheck()
+dbkit.Use("main").EnableTimestamps()
 ```
 
 ### ConfigTimestamps
@@ -701,22 +701,22 @@ dbkit.Delete("users", "id = ?", 1)
 
 Optimistic lock is a concurrency control mechanism that detects concurrent update conflicts through a version field, preventing data from being accidentally overwritten.
 
-**Performance Note:** DBKit disables optimistic lock checks by default for optimal performance. To enable, use `EnableOptimisticLockCheck()` or `EnableFeatureChecks()`.
+**Performance Note:** DBKit disables optimistic lock by default for optimal performance. To enable, use `EnableOptimisticLock()` or `EnableFeatureChecks()`.
 
-### EnableOptimisticLockCheck
+### EnableOptimisticLock
 ```go
-func EnableOptimisticLockCheck()
-func (db *DB) EnableOptimisticLockCheck() *DB
+func EnableOptimisticLock()
+func (db *DB) EnableOptimisticLock() *DB
 ```
-Enables optimistic lock check feature. When enabled, Update operations will check table optimistic lock configuration and automatically perform version checks.
+Enables optimistic lock feature. When enabled, Update operations will check table optimistic lock configuration and automatically perform version checks.
 
 **Example:**
 ```go
-// Enable optimistic lock check globally
-dbkit.EnableOptimisticLockCheck()
+// Enable optimistic lock globally
+dbkit.EnableOptimisticLock()
 
 // Multi-database mode
-dbkit.Use("main").EnableOptimisticLockCheck()
+dbkit.Use("main").EnableOptimisticLock()
 ```
 
 ### EnableFeatureChecks
