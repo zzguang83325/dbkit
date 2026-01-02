@@ -424,6 +424,29 @@ func (tx *Tx) DeleteRecord(table string, record *Record) (int64, error)
 
 软删除允许删除记录时只标记为已删除而非物理删除，便于数据恢复和审计。
 
+**性能说明**: DBKit 默认关闭软删除检查以获得最佳性能。如需使用此功能，请先启用：
+
+```go
+// 启用软删除检查
+dbkit.EnableSoftDeleteCheck()
+```
+
+### EnableSoftDeleteCheck
+```go
+func EnableSoftDeleteCheck()
+func (db *DB) EnableSoftDeleteCheck() *DB
+```
+启用软删除检查功能。启用后，查询操作会自动过滤已软删除的记录。
+
+**示例:**
+```go
+// 全局启用软删除检查
+dbkit.EnableSoftDeleteCheck()
+
+// 多数据库模式
+dbkit.Use("main").EnableSoftDeleteCheck()
+```
+
 ### 软删除类型
 ```go
 const (

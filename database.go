@@ -141,6 +141,7 @@ type dbManager struct {
 	// Feature flags
 	enableTimestampCheck      bool // Enable auto timestamp check in Update (default: false)
 	enableOptimisticLockCheck bool // Enable optimistic lock check in Update (default: false)
+	enableSoftDeleteCheck     bool // Enable soft delete check in queries (default: false)
 }
 
 // MultiDBManager manages multiple database connections
@@ -2335,14 +2336,15 @@ func (db *DB) EnableOptimisticLockCheck() *DB {
 	return db
 }
 
-// EnableFeatureChecks enables both timestamp and optimistic lock checks.
+// EnableFeatureChecks enables all feature checks at once.
 // This is a convenience function to enable all feature checks at once.
 func EnableFeatureChecks() {
 	EnableTimestampCheck()
 	EnableOptimisticLockCheck()
+	EnableSoftDeleteCheck()
 }
 
-// EnableFeatureChecks enables both timestamp and optimistic lock checks for this database instance.
+// EnableFeatureChecks enables all feature checks for this database instance.
 func (db *DB) EnableFeatureChecks() *DB {
 	if db.lastErr != nil {
 		return db
@@ -2351,6 +2353,31 @@ func (db *DB) EnableFeatureChecks() *DB {
 	defer db.dbMgr.mu.Unlock()
 	db.dbMgr.enableTimestampCheck = true
 	db.dbMgr.enableOptimisticLockCheck = true
+	db.dbMgr.enableSoftDeleteCheck = true
+	return db
+}
+
+// EnableSoftDeleteCheck enables soft delete check in query operations.
+// When enabled, queries will automatically filter out soft-deleted records.
+// Default is false (disabled) for better performance.
+func EnableSoftDeleteCheck() {
+	mgr, err := defaultDB()
+	if err != nil {
+		return
+	}
+	mgr.dbMgr.mu.Lock()
+	defer mgr.dbMgr.mu.Unlock()
+	mgr.dbMgr.enableSoftDeleteCheck = true
+}
+
+// EnableSoftDeleteCheck enables soft delete check for this database instance.
+func (db *DB) EnableSoftDeleteCheck() *DB {
+	if db.lastErr != nil {
+		return db
+	}
+	db.dbMgr.mu.Lock()
+	defer db.dbMgr.mu.Unlock()
+	db.dbMgr.enableSoftDeleteCheck = true
 	return db
 }
 

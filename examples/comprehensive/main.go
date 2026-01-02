@@ -979,6 +979,10 @@ func testAutoTimestamps() {
 func testSoftDelete() {
 	fmt.Println("\n[测试 12: 软删除 (Soft Delete)]")
 
+	// 启用软删除检查
+	dbkit.EnableSoftDeleteCheck()
+	fmt.Println("  ✓ 已启用软删除检查")
+
 	// 创建带软删除字段的表
 	dbkit.Exec("DROP TABLE IF EXISTS documents")
 	_, err := dbkit.Exec(`CREATE TABLE documents (

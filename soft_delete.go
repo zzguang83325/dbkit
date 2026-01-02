@@ -70,7 +70,7 @@ func (r *softDeleteRegistry) has(table string) bool {
 // ISoftDeleteModel is an optional interface for models that support soft delete
 type ISoftDeleteModel interface {
 	IDbModel
-	SoftDeleteField() string       // Returns the soft delete field name
+	SoftDeleteField() string        // Returns the soft delete field name
 	SoftDeleteType() SoftDeleteType // Returns the soft delete type
 }
 
@@ -323,6 +323,11 @@ func (mgr *dbManager) restore(executor sqlExecutor, table string, where string, 
 
 // buildSoftDeleteCondition builds the WHERE condition for filtering soft-deleted records
 func (mgr *dbManager) buildSoftDeleteCondition(table string, includeDeleted, onlyDeleted bool) string {
+	// Check if soft delete check is enabled
+	if !mgr.enableSoftDeleteCheck {
+		return ""
+	}
+
 	config := mgr.getSoftDeleteConfig(table)
 	if config == nil {
 		return ""

@@ -28,6 +28,9 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Enable soft delete check first
+	dbkit.EnableSoftDeleteCheck()
+
 	// Configure soft delete for users table
 	dbkit.ConfigSoftDelete("users", "deleted_at")
 

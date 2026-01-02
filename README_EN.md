@@ -59,7 +59,7 @@ MySQL-based performance test results (using separate tables to eliminate cache e
 
 ## Performance Optimization
 
-DBKit disables timestamp auto-update and optimistic lock checks by default for optimal performance. To enable:
+DBKit disables timestamp auto-update, optimistic lock checks, and soft delete checks by default for optimal performance. To enable:
 
 ```go
 // Enable timestamp auto-update
@@ -68,7 +68,10 @@ dbkit.EnableTimestampCheck()
 // Enable optimistic lock check
 dbkit.EnableOptimisticLockCheck()
 
-// Enable both features
+// Enable soft delete check
+dbkit.EnableSoftDeleteCheck()
+
+// Enable all features
 dbkit.EnableFeatureChecks()
 ```
 
@@ -526,6 +529,13 @@ dbkit.Table("users").Where("id = ?", 1).WithoutTimestamps().Update(record)
 ```
 
 ### 7. Soft Delete
+
+**Performance Note**: DBKit disables soft delete checks by default for optimal performance. To enable this feature:
+
+```go
+// Enable soft delete check
+dbkit.EnableSoftDeleteCheck()
+```
 
 ```go
 // Configure soft delete

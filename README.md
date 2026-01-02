@@ -59,7 +59,7 @@ DBKit 在大多数 CRUD 操作上领先 GORM，**总体性能快 15.1%**。
 
 ## 性能优化说明
 
-DBKit 默认关闭了时间戳自动更新和乐观锁检查功能，以获得最佳性能。如需启用：
+DBKit 默认关闭了时间戳自动更新、乐观锁检查和软删除检查功能，以获得最佳性能。如需启用：
 
 ```go
 // 启用时间戳自动更新
@@ -68,7 +68,10 @@ dbkit.EnableTimestampCheck()
 // 启用乐观锁检查
 dbkit.EnableOptimisticLockCheck()
 
-// 同时启用两个功能
+// 启用软删除检查
+dbkit.EnableSoftDeleteCheck()
+
+// 同时启用所有功能
 dbkit.EnableFeatureChecks()
 ```
 
@@ -1172,6 +1175,13 @@ users, _ := dbkit.Table("users").
 ### 11. 软删除 (Soft Delete)
 
 软删除允许删除记录时只标记为已删除而非物理删除，便于数据恢复和审计。
+
+**性能说明**: DBKit 默认关闭软删除检查以获得最佳性能。如需使用此功能，请先启用：
+
+```go
+// 启用软删除检查
+dbkit.EnableSoftDeleteCheck()
+```
 
 #### 配置软删除
 ```go

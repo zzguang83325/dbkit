@@ -340,6 +340,29 @@ Deletes a record based on its primary key.
 
 Soft delete allows marking records as deleted instead of physically removing them, enabling data recovery and auditing.
 
+**Performance Note**: DBKit disables soft delete checks by default for optimal performance. To enable this feature, use:
+
+```go
+// Enable soft delete check
+dbkit.EnableSoftDeleteCheck()
+```
+
+### EnableSoftDeleteCheck
+```go
+func EnableSoftDeleteCheck()
+func (db *DB) EnableSoftDeleteCheck() *DB
+```
+Enables soft delete check feature. When enabled, query operations will automatically filter out soft-deleted records.
+
+**Example:**
+```go
+// Enable soft delete check globally
+dbkit.EnableSoftDeleteCheck()
+
+// Multi-database mode
+dbkit.Use("main").EnableSoftDeleteCheck()
+```
+
 ### Soft Delete Types
 ```go
 const (
