@@ -71,8 +71,6 @@ dbkit.EnableOptimisticLock()
 // Enable soft delete
 dbkit.EnableSoftDelete()
 
-// Enable all features
-dbkit.EnableFeatureChecks()
 ```
 
 ## Installation

@@ -89,17 +89,17 @@ GORM 在以下场景仍有其价值：
 
 ### 性能优化说明
 
-DBKit 默认关闭了时间戳自动更新和乐观锁检查功能，以获得最佳性能。如需启用这些功能：
+DBKit 默认关闭了时间戳自动更新 、软删除和乐观锁检查功能，以获得最佳性能。如需启用这些功能：
 
 ```go
 // 启用时间戳自动更新
-dbkit.EnableTimestampCheck()
+dbkit.EnableTimestamps()
 
-// 启用乐观锁检查
-dbkit.EnableOptimisticLockCheck()
+// 启用乐观锁功能
+dbkit.EnableOptimisticLock()
 
-// 同时启用两个功能
-dbkit.EnableFeatureChecks()
+// 启用软删除功能
+dbkit.EnableSoftDelete()
 ```
 
 启用这些功能后，Update 操作会有额外的检查开销，但仍然保持良好的性能。

@@ -1,22 +1,23 @@
 # DBKit API Reference
 
-[中文版](api.md) | [README](README.md) | [English README](README_EN.md)
+[Chinese Version](api.md) | [README](README.md) | [English README](README_EN.md)
 
 ## Table of Contents
 
 - [Database Initialization](#database-initialization)
 - [Query Operations](#query-operations)
-- [Insert & Update](#insert--update)
+- [Query Timeout Control](#query-timeout-control)
+- [Insert and Update](#insert-and-update)
 - [Delete Operations](#delete-operations)
 - [Soft Delete](#soft-delete)
-- [Auto Timestamps](#auto-timestamps)
+- [Automatic Timestamps](#automatic-timestamps)
 - [Optimistic Lock](#optimistic-lock)
-- [Transaction Handling](#transaction-handling)
+- [Transaction Processing](#transaction-processing)
 - [Record Object](#record-object)
-- [Chain Query](#chain-query)
+- [Chained Query](#chained-query)
 - [DbModel Operations](#dbmodel-operations)
 - [Cache Operations](#cache-operations)
-- [Logging Configuration](#logging-configuration)
+- [Log Configuration](#log-configuration)
 - [Utility Functions](#utility-functions)
 
 ---
@@ -27,11 +28,11 @@
 ```go
 func OpenDatabase(driver DriverType, dsn string, maxOpen int) error
 ```
-Opens a database connection with default configuration.
+Open database connection with default configuration.
 
 **Parameters:**
 - `driver`: Database driver type (MySQL, PostgreSQL, SQLite3, Oracle, SQLServer)
-- `dsn`: Data source name (connection string)
+- `dsn`: Data Source Name (connection string)
 - `maxOpen`: Maximum number of open connections
 
 **Example:**
@@ -43,16 +44,17 @@ err := dbkit.OpenDatabase(dbkit.MySQL, "root:password@tcp(localhost:3306)/test",
 ```go
 func OpenDatabaseWithConfig(config *Config) error
 ```
-Opens a database connection with custom configuration.
+Open database connection with custom configuration.
 
-**Config struct:**
+**Config Struct:**
 ```go
 type Config struct {
     Driver          DriverType    // Database driver type
-    DSN             string        // Data source name
+    DSN             string        // Data Source Name
     MaxOpen         int           // Maximum open connections
     MaxIdle         int           // Maximum idle connections
     ConnMaxLifetime time.Duration // Maximum connection lifetime
+    QueryTimeout    time.Duration // Default query timeout (0 means no limit)
 }
 ```
 
@@ -60,19 +62,19 @@ type Config struct {
 ```go
 func OpenDatabaseWithDBName(dbname string, driver DriverType, dsn string, maxOpen int) error
 ```
-Opens a database connection with a specified name (multi-database mode).
+Open a database connection with a specified name (Multi-database mode).
 
 ### Register
 ```go
 func Register(dbname string, config *Config) error
 ```
-Registers a named database with custom configuration.
+Register a named database with custom configuration.
 
 ### Use
 ```go
 func Use(dbname string) *DB
 ```
-Switches to the specified database and returns a DB object for chaining.
+Switch to the database with the specified name and return the DB object for chaining.
 
 **Example:**
 ```go
@@ -85,14 +87,14 @@ records, err := db.Query("SELECT * FROM users")
 func Close() error
 func CloseDB(dbname string) error
 ```
-Closes database connections.
+Close database connections.
 
 ### Ping
 ```go
 func Ping() error
 func PingDB(dbname string) error
 ```
-Tests database connectivity.
+Test database connection.
 
 ---
 
@@ -104,7 +106,7 @@ func Query(querySQL string, args ...interface{}) ([]Record, error)
 func (db *DB) Query(querySQL string, args ...interface{}) ([]Record, error)
 func (tx *Tx) Query(querySQL string, args ...interface{}) ([]Record, error)
 ```
-Executes a query and returns multiple records.
+Execute a query and return multiple records.
 
 **Example:**
 ```go
@@ -117,35 +119,35 @@ func QueryFirst(querySQL string, args ...interface{}) (*Record, error)
 func (db *DB) QueryFirst(querySQL string, args ...interface{}) (*Record, error)
 func (tx *Tx) QueryFirst(querySQL string, args ...interface{}) (*Record, error)
 ```
-Executes a query and returns the first record, or nil if no records found.
+Execute a query and return the first record. Returns nil if no record found.
 
 ### QueryMap
 ```go
 func QueryMap(querySQL string, args ...interface{}) ([]map[string]interface{}, error)
 func (db *DB) QueryMap(querySQL string, args ...interface{}) ([]map[string]interface{}, error)
 ```
-Executes a query and returns a slice of maps.
+Execute a query and return a slice of maps.
 
 ### QueryToDbModel
 ```go
 func QueryToDbModel(dest interface{}, querySQL string, args ...interface{}) error
 func (db *DB) QueryToDbModel(dest interface{}, querySQL string, args ...interface{}) error
 ```
-Executes a query and maps results to a struct slice.
+Execute a query and map the results to a struct slice.
 
 ### QueryFirstToDbModel
 ```go
 func QueryFirstToDbModel(dest interface{}, querySQL string, args ...interface{}) error
 func (db *DB) QueryFirstToDbModel(dest interface{}, querySQL string, args ...interface{}) error
 ```
-Executes a query and maps the first result to a struct.
+Execute a query and map the first result to a struct.
 
 ### Count
 ```go
 func Count(table string, whereSql string, whereArgs ...interface{}) (int64, error)
 func (db *DB) Count(table string, whereSql string, whereArgs ...interface{}) (int64, error)
 ```
-Counts records matching the condition.
+Count records matching the conditions.
 
 **Example:**
 ```go
@@ -157,32 +159,32 @@ count, err := dbkit.Count("users", "age > ?", 18)
 func Exists(table string, whereSql string, whereArgs ...interface{}) (bool, error)
 func (db *DB) Exists(table string, whereSql string, whereArgs ...interface{}) (bool, error)
 ```
-Checks if records matching the condition exist.
+Check if records matching the conditions exist.
 
 ### FindAll
 ```go
 func FindAll(table string) ([]Record, error)
 func (db *DB) FindAll(table string) ([]Record, error)
 ```
-Retrieves all records from a table.
+Query all records in the table.
 
 ### Paginate
 ```go
 func Paginate(page, pageSize int, selectSql, table, whereSql, orderBySql string, args ...interface{}) (*Page[Record], error)
 func (db *DB) Paginate(page, pageSize int, selectSql, table, whereSql, orderBySql string, args ...interface{}) (*Page[Record], error)
 ```
-Performs paginated query.
+Pagination query.
 
 **Parameters:**
-- `page`: Page number (starting from 1)
-- `pageSize`: Records per page
-- `selectSql`: SELECT clause
+- `page`: Page number (starts from 1)
+- `pageSize`: Number of records per page
+- `selectSql`: SELECT part
 - `table`: Table name
 - `whereSql`: WHERE condition
-- `orderBySql`: ORDER BY clause
+- `orderBySql`: ORDER BY part
 - `args`: Query parameters
 
-**Returns Page struct:**
+**Returns Page Struct:**
 ```go
 type Page[T any] struct {
     List       []T   // Data list
@@ -195,7 +197,89 @@ type Page[T any] struct {
 
 ---
 
-## Insert & Update
+## Query Timeout Control
+
+DBKit supports global and single query timeout settings using Go's standard `context.Context`.
+
+### Global Timeout Configuration
+Set the `QueryTimeout` field in Config:
+```go
+config := &dbkit.Config{
+    Driver:       dbkit.MySQL,
+    DSN:          "root:password@tcp(localhost:3306)/test",
+    MaxOpen:      10,
+    QueryTimeout: 30 * time.Second,  // All queries default to 30s timeout
+}
+dbkit.OpenDatabaseWithConfig(config)
+```
+
+### Timeout (Global Function)
+```go
+func Timeout(d time.Duration) *DB
+```
+Returns a DB instance with the specified timeout.
+
+**Example:**
+```go
+users, err := dbkit.Timeout(5 * time.Second).Query("SELECT * FROM users")
+```
+
+### DB.Timeout
+```go
+func (db *DB) Timeout(d time.Duration) *DB
+```
+Set query timeout for the DB instance.
+
+**Example:**
+```go
+users, err := dbkit.Use("default").Timeout(5 * time.Second).Query("SELECT * FROM users")
+```
+
+### Tx.Timeout
+```go
+func (tx *Tx) Timeout(d time.Duration) *Tx
+```
+Set query timeout for the transaction.
+
+**Example:**
+```go
+dbkit.Transaction(func(tx *dbkit.Tx) error {
+    _, err := tx.Timeout(5 * time.Second).Query("SELECT * FROM orders")
+    return err
+})
+```
+
+### QueryBuilder.Timeout
+```go
+func (qb *QueryBuilder) Timeout(d time.Duration) *QueryBuilder
+```
+Set timeout for chained queries.
+
+**Example:**
+```go
+users, err := dbkit.Table("users").
+    Where("age > ?", 18).
+    Timeout(10 * time.Second).
+    Find()
+```
+
+### Timeout Error Handling
+Returns `context.DeadlineExceeded` error upon timeout:
+```go
+import "context"
+import "errors"
+
+users, err := dbkit.Timeout(1 * time.Second).Query("SELECT SLEEP(5)")
+if err != nil {
+    if errors.Is(err, context.DeadlineExceeded) {
+        fmt.Println("Query timeout")
+    }
+}
+```
+
+---
+
+## Insert and Update
 
 ### Exec
 ```go
@@ -203,7 +287,7 @@ func Exec(querySQL string, args ...interface{}) (sql.Result, error)
 func (db *DB) Exec(querySQL string, args ...interface{}) (sql.Result, error)
 func (tx *Tx) Exec(querySQL string, args ...interface{}) (sql.Result, error)
 ```
-Executes SQL statements (INSERT, UPDATE, DELETE, etc.).
+Execute SQL statements (INSERT, UPDATE, DELETE, etc.).
 
 ### Save
 ```go
@@ -211,9 +295,9 @@ func Save(table string, record *Record) (int64, error)
 func (db *DB) Save(table string, record *Record) (int64, error)
 func (tx *Tx) Save(table string, record *Record) (int64, error)
 ```
-Smart save: updates if primary key exists and record found, otherwise inserts.
+Smart save record. Updates if primary key exists and record exists, otherwise inserts.
 
-**Returns:** New ID on insert, affected rows on update.
+**Returns:** New ID for insert, rows affected for update.
 
 ### Insert
 ```go
@@ -221,7 +305,7 @@ func Insert(table string, record *Record) (int64, error)
 func (db *DB) Insert(table string, record *Record) (int64, error)
 func (tx *Tx) Insert(table string, record *Record) (int64, error)
 ```
-Forces insertion of a new record.
+Force insert a new record.
 
 **Returns:** ID of the newly inserted record.
 
@@ -231,78 +315,81 @@ func Update(table string, record *Record, whereSql string, whereArgs ...interfac
 func (db *DB) Update(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error)
 func (tx *Tx) Update(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error)
 ```
-Updates records matching the condition. Supports auto-timestamp and optimistic lock features.
+Update records based on conditions.
 
-**Returns:** Number of affected rows.
+**Returns:** Number of rows affected.
 
-**Performance Note:** DBKit disables timestamp auto-update and optimistic lock by default for optimal performance. To enable these features, use `EnableTimestamps()` or `EnableOptimisticLock()`.
+**Performance Note:** DBKit disables automatic timestamp updates and optimistic locking by default for best performance. To enable these features, use `EnableTimestamps()` or `EnableOptimisticLock()`.
 
 ### UpdateFast
 ```go
 func UpdateFast(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error)
 func (db *DB) UpdateFast(table string, record *Record, whereSql string, whereArgs ...interface{}) (int64, error)
 ```
-Lightweight update that always skips timestamp and optimistic lock checks for maximum performance.
+Lightweight update that always skips timestamps and optimistic lock checks, providing best performance.
 
-**Returns:** Number of affected rows.
+**Returns:** Number of rows affected.
 
 **Use Cases:**
 
-1. **High-frequency Updates**: High-concurrency update operations requiring extreme performance
+1. **High-frequency update scenarios**: High concurrency updates requiring extreme performance
    ```go
-   // Game server updating player scores
+   // Game server updating player score
    record := dbkit.NewRecord().Set("score", newScore)
    dbkit.UpdateFast("players", record, "id = ?", playerId)
    ```
 
-2. **Batch Updates**: Reducing overhead when updating large amounts of data
+2. **Batch updates**: Reducing overhead during mass data updates
    ```go
-   // Batch update product inventory
+   // Batch update product stock
    for _, item := range items {
        record := dbkit.NewRecord().Set("stock", item.Stock)
        dbkit.UpdateFast("products", record, "id = ?", item.ID)
    }
    ```
 
-3. **Tables Without Feature Requirements**: Tables that don't need timestamp or optimistic lock features
+3. Tables that do not need timestamp or optimistic lock features
+   
    ```go
-   // Update configuration table (no timestamp needed)
+   // Update config table (no timestamp needed)
    record := dbkit.NewRecord().Set("value", "new_value")
    dbkit.UpdateFast("config", record, "key = ?", "app_version")
    ```
-
-4. **Skip Checks When Features Enabled**: Feature checks enabled globally, but specific operations need maximum performance
-   ```go
-   // Feature checks enabled globally
-   dbkit.EnableFeatureChecks()
    
-   // But some high-frequency operations need to skip checks
+4. **Features enabled but need to be skipped for specific operations**: 
+   
+   ```go
+   
+   dbkit.EnableTimestamp()
+   
+   // But skip for some high-frequency operations
    record := dbkit.NewRecord().Set("view_count", viewCount)
    dbkit.UpdateFast("articles", record, "id = ?", articleId)
    ```
 
 **Performance Comparison:**
-- When feature checks are disabled, `Update` and `UpdateFast` have the same performance
-- When feature checks are enabled, `UpdateFast` is about 2-3x faster than `Update`
+- When timestamps, soft delete, optimistic lock, etc. are disabled, `Update` and `UpdateFast` have the same performance.
+- When these features are enabled, `UpdateFast` is about 2-3 times faster than `Update`.
 
-**Important Notes:**
-- `UpdateFast` does not automatically update the `updated_at` field
-- `UpdateFast` does not perform optimistic lock version checks
-- If you need these features, use `Update` and enable the corresponding feature checks
+**Notes:**
+
+- `UpdateFast` will NOT automatically update `updated_at` field.
+- `UpdateFast` will NOT perform optimistic lock version checks.
+- If you need these features, use `Update` and enable the corresponding feature checks.
 
 ### UpdateRecord
 ```go
 func (db *DB) UpdateRecord(table string, record *Record) (int64, error)
 func (tx *Tx) UpdateRecord(table string, record *Record) (int64, error)
 ```
-Updates a record based on its primary key.
+Update record based on the primary key in Record.
 
 ### BatchInsert
 ```go
 func BatchInsert(table string, records []*Record, batchSize int) (int64, error)
 func (db *DB) BatchInsert(table string, records []*Record, batchSize int) (int64, error)
 ```
-Batch inserts records.
+Batch insert records.
 
 **Parameters:**
 - `batchSize`: Number of records per batch
@@ -312,7 +399,7 @@ Batch inserts records.
 func BatchInsertDefault(table string, records []*Record) (int64, error)
 func (db *DB) BatchInsertDefault(table string, records []*Record) (int64, error)
 ```
-Batch inserts records with default batch size of 100.
+Batch insert records, default batch size is 100.
 
 ---
 
@@ -324,7 +411,7 @@ func Delete(table string, whereSql string, whereArgs ...interface{}) (int64, err
 func (db *DB) Delete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
 func (tx *Tx) Delete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
 ```
-Deletes records matching the condition. If soft delete is configured for the table, performs a soft delete (updates the delete marker field).
+Delete records based on conditions. If soft delete is configured for the table, performs soft delete (updates the deletion marker field).
 
 ### DeleteRecord
 ```go
@@ -332,18 +419,18 @@ func DeleteRecord(table string, record *Record) (int64, error)
 func (db *DB) DeleteRecord(table string, record *Record) (int64, error)
 func (tx *Tx) DeleteRecord(table string, record *Record) (int64, error)
 ```
-Deletes a record based on its primary key.
+Delete record based on the primary key in Record.
 
 ---
 
 ## Soft Delete
 
-Soft delete allows marking records as deleted instead of physically removing them, enabling data recovery and auditing.
+Soft delete marks records as deleted instead of physically removing them, facilitating data recovery and auditing.
 
-**Performance Note**: DBKit disables soft delete by default for optimal performance. To enable this feature, use:
+**Performance Note**: DBKit disables soft delete by default for best performance. To use this feature, enable it first:
 
 ```go
-// Enable soft delete
+// Enable soft delete feature
 dbkit.EnableSoftDelete()
 ```
 
@@ -352,11 +439,11 @@ dbkit.EnableSoftDelete()
 func EnableSoftDelete()
 func (db *DB) EnableSoftDelete() *DB
 ```
-Enables soft delete feature. When enabled, query operations will automatically filter out soft-deleted records.
+Enable soft delete feature. Once enabled, query operations will automatically filter out soft-deleted records.
 
 **Example:**
 ```go
-// Enable soft delete globally
+// Global enable soft delete
 dbkit.EnableSoftDelete()
 
 // Multi-database mode
@@ -366,8 +453,8 @@ dbkit.Use("main").EnableSoftDelete()
 ### Soft Delete Types
 ```go
 const (
-    SoftDeleteTimestamp SoftDeleteType = iota  // Timestamp type (deleted_at)
-    SoftDeleteBool                              // Boolean type (is_deleted)
+    SoftDeleteTimestamp SoftDeleteType = iota  // Timestamp style (deleted_at)
+    SoftDeleteBool                              // Boolean style (is_deleted)
 )
 ```
 
@@ -376,7 +463,7 @@ const (
 func ConfigSoftDelete(table, field string)
 func (db *DB) ConfigSoftDelete(table, field string) *DB
 ```
-Configures soft delete for a table (timestamp type).
+Configure soft delete for a table (timestamp type).
 
 **Parameters:**
 - `table`: Table name
@@ -396,7 +483,7 @@ dbkit.Use("main").ConfigSoftDelete("users", "deleted_at")
 func ConfigSoftDeleteWithType(table, field string, deleteType SoftDeleteType)
 func (db *DB) ConfigSoftDeleteWithType(table, field string, deleteType SoftDeleteType) *DB
 ```
-Configures soft delete for a table with specified type.
+Configure soft delete for a table (specified type).
 
 **Example:**
 ```go
@@ -409,24 +496,24 @@ dbkit.ConfigSoftDeleteWithType("posts", "is_deleted", dbkit.SoftDeleteBool)
 func RemoveSoftDelete(table string)
 func (db *DB) RemoveSoftDelete(table string) *DB
 ```
-Removes soft delete configuration for a table.
+Remove soft delete configuration for a table.
 
 ### HasSoftDelete
 ```go
 func HasSoftDelete(table string) bool
 func (db *DB) HasSoftDelete(table string) bool
 ```
-Checks if soft delete is configured for a table.
+Check if soft delete is enabled for a table.
 
 ### WithTrashed
 ```go
 func (qb *QueryBuilder) WithTrashed() *QueryBuilder
 ```
-Includes soft-deleted records in query results.
+Include deleted records in the query.
 
 **Example:**
 ```go
-// Query all users (including deleted)
+// Query all users (including deleted ones)
 users, err := dbkit.Table("users").WithTrashed().Find()
 ```
 
@@ -434,7 +521,7 @@ users, err := dbkit.Table("users").WithTrashed().Find()
 ```go
 func (qb *QueryBuilder) OnlyTrashed() *QueryBuilder
 ```
-Returns only soft-deleted records.
+Query only deleted records.
 
 **Example:**
 ```go
@@ -449,7 +536,7 @@ func (db *DB) ForceDelete(table string, whereSql string, whereArgs ...interface{
 func (tx *Tx) ForceDelete(table string, whereSql string, whereArgs ...interface{}) (int64, error)
 func (qb *QueryBuilder) ForceDelete() (int64, error)
 ```
-Physically deletes records, bypassing soft delete configuration.
+Physically delete records, bypassing soft delete configuration.
 
 **Example:**
 ```go
@@ -467,7 +554,7 @@ func (db *DB) Restore(table string, whereSql string, whereArgs ...interface{}) (
 func (tx *Tx) Restore(table string, whereSql string, whereArgs ...interface{}) (int64, error)
 func (qb *QueryBuilder) Restore() (int64, error)
 ```
-Restores soft-deleted records.
+Restore soft-deleted records.
 
 **Example:**
 ```go
@@ -492,7 +579,7 @@ dbkit.Insert("users", record)
 dbkit.Delete("users", "id = ?", 1)
 
 // 4. Normal query (automatically filters deleted records)
-users, _ := dbkit.Table("users").Find()  // Excludes deleted
+users, _ := dbkit.Table("users").Find()  // Does not include deleted
 
 // 5. Query including deleted records
 allUsers, _ := dbkit.Table("users").WithTrashed().Find()
@@ -503,16 +590,16 @@ deletedUsers, _ := dbkit.Table("users").OnlyTrashed().Find()
 // 7. Restore deleted record
 dbkit.Restore("users", "id = ?", 1)
 
-// 8. Physical delete (permanently removes data)
+// 8. Physical delete (truly delete data)
 dbkit.ForceDelete("users", "id = ?", 1)
 ```
 
 ### DbModel Soft Delete Methods
 
-Generated DbModels automatically include soft delete methods:
+Generated DbModels automatically include soft delete related methods:
 
 ```go
-// Soft delete (if configured)
+// Soft delete (if soft delete is configured)
 user.Delete()
 
 // Physical delete
@@ -530,22 +617,22 @@ deletedUsers, _ := user.FindOnlyTrashed("", "id DESC")
 
 ---
 
-## Auto Timestamps
+## Automatic Timestamps
 
-Auto timestamps feature automatically fills timestamp fields when inserting and updating records, without manual setting.
+Automatic timestamps feature allows automatically populating timestamp fields during record insertion and update, without manual setting.
 
-**Performance Note:** DBKit disables auto timestamp by default for optimal performance. To enable, use `EnableTimestamps()` or `EnableFeatureChecks()`.
+**Performance Note:** DBKit disables automatic timestamps by default for best performance. To enable, use `EnableTimestamps()`.
 
 ### EnableTimestamps
 ```go
 func EnableTimestamps()
 func (db *DB) EnableTimestamps() *DB
 ```
-Enables auto timestamp feature. When enabled, Update operations will check table timestamp configuration and automatically update the `updated_at` field.
+Enable automatic timestamps feature. Once enabled, Update operations will check table timestamp configuration and automatically update `updated_at` field.
 
 **Example:**
 ```go
-// Enable timestamp globally
+// Global enable timestamp auto-update
 dbkit.EnableTimestamps()
 
 // Multi-database mode
@@ -557,11 +644,11 @@ dbkit.Use("main").EnableTimestamps()
 func ConfigTimestamps(table string)
 func (db *DB) ConfigTimestamps(table string) *DB
 ```
-Configures auto timestamps for a table using default field names `created_at` and `updated_at`.
+Configure automatic timestamps for a table, using default field names `created_at` and `updated_at`.
 
 **Example:**
 ```go
-// Configure auto timestamps
+// Configure automatic timestamps
 dbkit.ConfigTimestamps("users")
 
 // Multi-database mode
@@ -573,12 +660,12 @@ dbkit.Use("main").ConfigTimestamps("users")
 func ConfigTimestampsWithFields(table, createdAtField, updatedAtField string)
 func (db *DB) ConfigTimestampsWithFields(table, createdAtField, updatedAtField string) *DB
 ```
-Configures auto timestamps for a table with custom field names.
+Configure automatic timestamps for a table using custom field names.
 
 **Parameters:**
 - `table`: Table name
-- `createdAtField`: Created at field name (e.g., "create_time")
-- `updatedAtField`: Updated at field name (e.g., "update_time")
+- `createdAtField`: Create time field name (e.g., "create_time")
+- `updatedAtField`: Update time field name (e.g., "update_time")
 
 **Example:**
 ```go
@@ -591,11 +678,11 @@ dbkit.ConfigTimestampsWithFields("orders", "create_time", "update_time")
 func ConfigCreatedAt(table, field string)
 func (db *DB) ConfigCreatedAt(table, field string) *DB
 ```
-Configures only the created_at field.
+Configure only `created_at` field.
 
 **Example:**
 ```go
-// Configure only created_at (suitable for log tables)
+// Only configure create time (suitable for logs tables that only need to record creation time)
 dbkit.ConfigCreatedAt("logs", "log_time")
 ```
 
@@ -604,11 +691,11 @@ dbkit.ConfigCreatedAt("logs", "log_time")
 func ConfigUpdatedAt(table, field string)
 func (db *DB) ConfigUpdatedAt(table, field string) *DB
 ```
-Configures only the updated_at field.
+Configure only `updated_at` field.
 
 **Example:**
 ```go
-// Configure only updated_at
+// Only configure update time
 dbkit.ConfigUpdatedAt("cache_data", "last_modified")
 ```
 
@@ -617,36 +704,36 @@ dbkit.ConfigUpdatedAt("cache_data", "last_modified")
 func RemoveTimestamps(table string)
 func (db *DB) RemoveTimestamps(table string) *DB
 ```
-Removes timestamp configuration for a table.
+Remove timestamp configuration for a table.
 
 ### HasTimestamps
 ```go
 func HasTimestamps(table string) bool
 func (db *DB) HasTimestamps(table string) bool
 ```
-Checks if auto timestamps are configured for a table.
+Check if a table has automatic timestamps configured.
 
 ### WithoutTimestamps
 ```go
 func (qb *QueryBuilder) WithoutTimestamps() *QueryBuilder
 ```
-Temporarily disables auto timestamps (for QueryBuilder Update operations).
+Temporarily disable automatic timestamps (for QueryBuilder Update operations).
 
 **Example:**
 ```go
-// Update without auto-filling updated_at
+// Do not auto-fill updated_at during update
 dbkit.Table("users").Where("id = ?", 1).WithoutTimestamps().Update(record)
 ```
 
-### Auto Timestamps Behavior
+### Automatic Timestamp Behavior Explanation
 
-- **Insert operation**: If `created_at` field is not set, automatically fills with current time
-- **Update operation**: Always automatically fills `updated_at` field with current time
-- **Manual setting priority**: If `created_at` is already set in Record, it won't be overwritten
+- **Insert Operation**: If `created_at` field is not set, automatically populate with current time.
+- **Update Operation**: Always automatically populate `updated_at` field with current time.
+- **Manual Setting Priority**: If `created_at` is already set in the Record, it will not be overwritten.
 
-### Complete Auto Timestamps Example
+### Complete Automatic Timestamp Example
 ```go
-// 1. Configure auto timestamps
+// 1. Configure automatic timestamps
 dbkit.ConfigTimestamps("users")
 
 // 2. Insert data (created_at auto-filled)
@@ -662,7 +749,7 @@ updateRecord.Set("name", "John Updated")
 dbkit.Update("users", updateRecord, "id = ?", 1)
 // updated_at automatically set to current time
 
-// 4. Insert with manual created_at (won't be overwritten)
+// 4. Manually specify created_at during insert (will not be overwritten)
 customTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 record2 := dbkit.NewRecord()
 record2.Set("name", "Jane")
@@ -670,27 +757,27 @@ record2.Set("created_at", customTime)
 dbkit.Insert("users", record2)
 // created_at remains 2020-01-01
 
-// 5. Temporarily disable auto timestamps
+// 5. Temporarily disable automatic timestamps
 dbkit.Table("users").Where("id = ?", 1).WithoutTimestamps().Update(record)
-// updated_at won't be auto-updated
+// updated_at will not be automatically updated
 
 // 6. Use custom field names
 dbkit.ConfigTimestampsWithFields("orders", "create_time", "update_time")
 
-// 7. Configure only created_at (suitable for log tables)
+// 7. Only configure created_at (suitable for logging)
 dbkit.ConfigCreatedAt("logs", "log_time")
 ```
 
-### Using with Soft Delete
+### Use with Soft Delete
 
-Auto timestamps and soft delete features are independent and can be used together:
+Automatic timestamps and soft delete features are independent and can be used together:
 
 ```go
-// Configure both soft delete and auto timestamps
+// Configure both soft delete and automatic timestamps
 dbkit.ConfigTimestamps("users")
 dbkit.ConfigSoftDelete("users", "deleted_at")
 
-// When soft deleting, updated_at is also auto-updated
+// During soft delete, updated_at will also be updated
 dbkit.Delete("users", "id = ?", 1)
 // deleted_at set to current time, updated_at also updated
 ```
@@ -699,60 +786,44 @@ dbkit.Delete("users", "id = ?", 1)
 
 ## Optimistic Lock
 
-Optimistic lock is a concurrency control mechanism that detects concurrent update conflicts through a version field, preventing data from being accidentally overwritten.
+Optimistic lock is a concurrency control mechanism that uses a version number field to detect concurrent update conflicts and prevent data from being accidentally overwritten.
 
-**Performance Note:** DBKit disables optimistic lock by default for optimal performance. To enable, use `EnableOptimisticLock()` or `EnableFeatureChecks()`.
+**Performance Note:** DBKit disables optimistic locking by default for best performance. To enable, use `EnableOptimisticLock()`.
 
 ### EnableOptimisticLock
 ```go
 func EnableOptimisticLock()
 func (db *DB) EnableOptimisticLock() *DB
 ```
-Enables optimistic lock feature. When enabled, Update operations will check table optimistic lock configuration and automatically perform version checks.
+Enable optimistic lock feature. Once enabled, Update operations will check the table's optimistic lock configuration and automatically perform version checks.
 
 **Example:**
 ```go
-// Enable optimistic lock globally
+// Global enable optimistic lock
 dbkit.EnableOptimisticLock()
 
 // Multi-database mode
 dbkit.Use("main").EnableOptimisticLock()
 ```
 
-### EnableFeatureChecks
-```go
-func EnableFeatureChecks()
-func (db *DB) EnableFeatureChecks() *DB
-```
-Enables both timestamp check and optimistic lock check features.
-
-**Example:**
-```go
-// Enable all feature checks globally
-dbkit.EnableFeatureChecks()
-
-// Multi-database mode
-dbkit.Use("main").EnableFeatureChecks()
-```
-
 ### How It Works
 
-1. **Insert**: Automatically initializes the version field to 1
-2. **Update**: Automatically adds version check to WHERE clause and increments version in SET clause
-3. **Conflict Detection**: If update affects 0 rows (version mismatch), returns `ErrVersionMismatch` error
+1. **Insert**: Automatically initialize version field to 1.
+2. **Update**: Automatically add version check to WHERE condition and increment version number in SET.
+3. **Conflict Detection**: If update affects 0 rows (version mismatch), return `ErrVersionMismatch` error.
 
 ### ErrVersionMismatch
 ```go
 var ErrVersionMismatch = fmt.Errorf("dbkit: optimistic lock conflict - record was modified by another transaction")
 ```
-Error returned when version conflict is detected.
+Error returned when version conflict occurs.
 
 ### ConfigOptimisticLock
 ```go
 func ConfigOptimisticLock(table string)
 func (db *DB) ConfigOptimisticLock(table string) *DB
 ```
-Configures optimistic lock for a table using default field name `version`.
+Configure optimistic lock for a table, using default field name `version`.
 
 **Example:**
 ```go
@@ -768,7 +839,7 @@ dbkit.Use("main").ConfigOptimisticLock("products")
 func ConfigOptimisticLockWithField(table, versionField string)
 func (db *DB) ConfigOptimisticLockWithField(table, versionField string) *DB
 ```
-Configures optimistic lock for a table with custom version field name.
+Configure optimistic lock for a table using a custom version field name.
 
 **Example:**
 ```go
@@ -781,24 +852,24 @@ dbkit.ConfigOptimisticLockWithField("orders", "revision")
 func RemoveOptimisticLock(table string)
 func (db *DB) RemoveOptimisticLock(table string) *DB
 ```
-Removes optimistic lock configuration for a table.
+Remove optimistic lock configuration for a table.
 
 ### HasOptimisticLock
 ```go
 func HasOptimisticLock(table string) bool
 func (db *DB) HasOptimisticLock(table string) bool
 ```
-Checks if optimistic lock is configured for a table.
+Check if a table has optimistic lock configured.
 
 ### Version Field Handling Rules
 
-| version field value | Behavior |
-|---------------------|----------|
+| Version Field Value | Behavior |
+|-------------------|----------|
 | Not present | Skip version check, normal update |
 | `nil` / `NULL` | Skip version check, normal update |
-| `""` (empty string) | Skip version check, normal update |
+| `""` (Empty string) | Skip version check, normal update |
 | `0`, `1`, `2`, ... | Perform version check |
-| `"123"` (numeric string) | Perform version check (parsed as number) |
+| `"123"` (Numeric string) | Perform version check (parsed as number) |
 
 ### Complete Optimistic Lock Example
 
@@ -806,30 +877,30 @@ Checks if optimistic lock is configured for a table.
 // 1. Configure optimistic lock
 dbkit.ConfigOptimisticLock("products")
 
-// 2. Insert data (version auto-initialized to 1)
+// 2. Insert data (version auto-intialized to 1)
 record := dbkit.NewRecord()
 record.Set("name", "Laptop")
 record.Set("price", 999.99)
 dbkit.Insert("products", record)
 // version automatically set to 1
 
-// 3. Normal update (with version)
+// 3. Normal update (with version number)
 updateRecord := dbkit.NewRecord()
-updateRecord.Set("version", int64(1))  // current version
+updateRecord.Set("version", int64(1))  // Current version
 updateRecord.Set("price", 899.99)
 rows, err := dbkit.Update("products", updateRecord, "id = ?", 1)
 // Success: version auto-incremented to 2
 
 // 4. Concurrent conflict detection (using stale version)
 staleRecord := dbkit.NewRecord()
-staleRecord.Set("version", int64(1))  // stale version!
+staleRecord.Set("version", int64(1))  // Stale version!
 staleRecord.Set("price", 799.99)
 rows, err = dbkit.Update("products", staleRecord, "id = ?", 1)
 if errors.Is(err, dbkit.ErrVersionMismatch) {
-    fmt.Println("Concurrent conflict detected, record was modified by another transaction")
+    fmt.Println("Concurrent conflict detected, record modified by another transaction")
 }
 
-// 5. Correct way to handle concurrency: read latest version first
+// 5. Correctly handle concurrency: read latest version first
 latestRecord, _ := dbkit.Table("products").Where("id = ?", 1).FindFirst()
 currentVersion := latestRecord.GetInt("version")
 
@@ -838,19 +909,19 @@ updateRecord2.Set("version", currentVersion)
 updateRecord2.Set("price", 799.99)
 dbkit.Update("products", updateRecord2, "id = ?", 1)
 
-// 6. Update without version field (skips version check)
+// 6. Update without version field (skip version check)
 noVersionRecord := dbkit.NewRecord()
-noVersionRecord.Set("stock", 90)  // no version set
+noVersionRecord.Set("stock", 90)  // No version set
 dbkit.Update("products", noVersionRecord, "id = ?", 1)
 // Normal update, no version check
 
-// 7. Using UpdateRecord (auto-extracts version from record)
+// 7. Use UpdateRecord (auto-extract version from record)
 product, _ := dbkit.Table("products").Where("id = ?", 1).FindFirst()
 product.Set("name", "Gaming Laptop")
 dbkit.Use("default").UpdateRecord("products", product)
-// version is already in product, auto version check
+// version is in product, auto perform version check
 
-// 8. Using optimistic lock in transaction
+// 8. Use optimistic lock in transaction
 dbkit.Transaction(func(tx *dbkit.Tx) error {
     rec, _ := tx.Table("products").Where("id = ?", 1).FindFirst()
     currentVersion := rec.GetInt("version")
@@ -859,16 +930,16 @@ dbkit.Transaction(func(tx *dbkit.Tx) error {
     updateRec.Set("version", currentVersion)
     updateRec.Set("stock", 80)
     _, err := tx.Update("products", updateRec, "id = ?", 1)
-    return err  // auto rollback on version conflict
+    return err  // Auto rollback on version conflict
 })
 ```
 
-### Using with Other Features
+### Use with Other Features
 
-Optimistic lock can be used together with auto timestamps and soft delete:
+Optimistic lock can be used simultaneously with automatic timestamps and soft delete:
 
 ```go
-// Configure multiple features together
+// Configure multiple features simultaneously
 dbkit.ConfigOptimisticLock("products")
 dbkit.ConfigTimestamps("products")
 dbkit.ConfigSoftDelete("products", "deleted_at")
@@ -883,22 +954,22 @@ dbkit.ConfigSoftDelete("products", "deleted_at")
 ```go
 type IOptimisticLockModel interface {
     IDbModel
-    VersionField() string  // Returns version field name, empty string means not using
+    VersionField() string  // Return version field name, empty string means not used
 }
 ```
 
-Generated DbModels can implement this interface to auto-configure optimistic lock.
+Generated DbModels can implement this interface to automatically configure optimistic locking.
 
 ---
 
-## Transaction Handling
+## Transaction Processing
 
 ### Transaction
 ```go
 func Transaction(fn func(*Tx) error) error
 func (db *DB) Transaction(fn func(*Tx) error) error
 ```
-Automatic transaction handling. Rolls back if closure returns error, commits otherwise.
+Automatic transaction processing. Automatically rolls back if the closure returns an error, otherwise automatically commits.
 
 **Example:**
 ```go
@@ -916,19 +987,19 @@ err := dbkit.Transaction(func(tx *dbkit.Tx) error {
 ```go
 func BeginTransaction() (*Tx, error)
 ```
-Begins a manual transaction.
+Start a manual transaction.
 
 ### Tx.Commit
 ```go
 func (tx *Tx) Commit() error
 ```
-Commits the transaction.
+Commit transaction.
 
 ### Tx.Rollback
 ```go
 func (tx *Tx) Rollback() error
 ```
-Rolls back the transaction.
+Rollback transaction.
 
 ---
 
@@ -938,21 +1009,21 @@ Rolls back the transaction.
 ```go
 func NewRecord() *Record
 ```
-Creates a new empty Record object.
+Create a new empty Record object.
 
 ### Record.Set
 ```go
 func (r *Record) Set(column string, value interface{}) *Record
 ```
-Sets a field value, supports chaining.
+Set field value, supports chaining.
 
 ### Record.Get
 ```go
 func (r *Record) Get(column string) interface{}
 ```
-Gets a field value.
+Get field value.
 
-### Type-safe Getter Methods
+### Type-Safe Get Methods
 ```go
 func (r *Record) GetString(column string) string
 func (r *Record) GetInt(column string) int
@@ -961,7 +1032,7 @@ func (r *Record) GetFloat(column string) float64
 func (r *Record) GetBool(column string) bool
 func (r *Record) GetTime(column string) time.Time
 
-// Shorthand methods
+// Short methods
 func (r *Record) Str(column string) string
 func (r *Record) Int(column string) int
 func (r *Record) Int64(column string) int64
@@ -973,59 +1044,59 @@ func (r *Record) Bool(column string) bool
 ```go
 func (r *Record) Has(column string) bool
 ```
-Checks if a field exists.
+Check if field exists.
 
 ### Record.Keys
 ```go
 func (r *Record) Keys() []string
 ```
-Gets all field names.
+Get all field names.
 
 ### Record.Remove
 ```go
 func (r *Record) Remove(column string)
 ```
-Removes a field.
+Remove a field.
 
 ### Record.Clear
 ```go
 func (r *Record) Clear()
 ```
-Clears all fields.
+Clear all fields.
 
 ### Record.ToMap
 ```go
 func (r *Record) ToMap() map[string]interface{}
 ```
-Converts to map.
+Convert to map.
 
 ### Record.ToJson
 ```go
 func (r *Record) ToJson() string
 ```
-Converts to JSON string.
+Convert to JSON string.
 
 ### Record.FromJson
 ```go
 func (r *Record) FromJson(jsonStr string) error
 ```
-Parses from JSON string.
+Parse from JSON string.
 
 ### Record.ToStruct
 ```go
 func (r *Record) ToStruct(dest interface{}) error
 ```
-Converts to struct.
+Convert to struct.
 
 ### Record.FromStruct
 ```go
 func (r *Record) FromStruct(src interface{}) error
 ```
-Populates from struct.
+Populate from struct.
 
 ---
 
-## Chain Query
+## Chained Query
 
 ### Table
 ```go
@@ -1033,27 +1104,27 @@ func Table(name string) *QueryBuilder
 func (db *DB) Table(name string) *QueryBuilder
 func (tx *Tx) Table(name string) *QueryBuilder
 ```
-Starts a chain query, specifying the table name.
+Start a chained query, specifying the table name.
 
 ### QueryBuilder Methods
 
 ```go
-func (b *QueryBuilder) Select(columns string) *QueryBuilder    // Specify columns
+func (b *QueryBuilder) Select(columns string) *QueryBuilder    // Specify query columns
 func (b *QueryBuilder) Where(condition string, args ...interface{}) *QueryBuilder  // WHERE condition
 func (b *QueryBuilder) And(condition string, args ...interface{}) *QueryBuilder    // AND condition
-func (b *QueryBuilder) OrderBy(orderBy string) *QueryBuilder   // Order by
-func (b *QueryBuilder) Limit(limit int) *QueryBuilder          // Limit
+func (b *QueryBuilder) OrderBy(orderBy string) *QueryBuilder   // Sort
+func (b *QueryBuilder) Limit(limit int) *QueryBuilder          // Limit quantity
 func (b *QueryBuilder) Offset(offset int) *QueryBuilder        // Offset
 
-// Execution methods
-func (b *QueryBuilder) Find() ([]Record, error)                // Find multiple
+// Execution Methods
+func (b *QueryBuilder) Find() ([]Record, error)                // Query multiple
 func (b *QueryBuilder) Query() ([]Record, error)               // Alias for Find
-func (b *QueryBuilder) FindFirst() (*Record, error)            // Find first
+func (b *QueryBuilder) FindFirst() (*Record, error)            // Query first
 func (b *QueryBuilder) QueryFirst() (*Record, error)           // Alias for FindFirst
-func (b *QueryBuilder) FindToDbModel(dest interface{}) error   // Find and map to struct slice
-func (b *QueryBuilder) FindFirstToDbModel(dest interface{}) error // Find first and map to struct
+func (b *QueryBuilder) FindToDbModel(dest interface{}) error   // Query and map to struct slice
+func (b *QueryBuilder) FindFirstToDbModel(dest interface{}) error // Query first and map to struct
 func (b *QueryBuilder) Delete() (int64, error)                 // Delete
-func (b *QueryBuilder) Paginate(page, pageSize int) (*Page[Record], error) // Paginate
+func (b *QueryBuilder) Paginate(page, pageSize int) (*Page[Record], error) // Pagination
 ```
 
 **Example:**
@@ -1069,9 +1140,9 @@ users, err := dbkit.Table("users").
 // Args: [18, "active"]
 ```
 
-### Join Query
+### Join Queries
 
-Supports multiple JOIN types with chain calls:
+Supports chaining various JOIN types:
 
 ```go
 func (b *QueryBuilder) Join(table, condition string, args ...interface{}) *QueryBuilder      // JOIN
@@ -1080,7 +1151,7 @@ func (b *QueryBuilder) RightJoin(table, condition string, args ...interface{}) *
 func (b *QueryBuilder) InnerJoin(table, condition string, args ...interface{}) *QueryBuilder // INNER JOIN
 ```
 
-**Examples:**
+**Example:**
 ```go
 // Simple LEFT JOIN
 records, err := dbkit.Table("users").
@@ -1091,7 +1162,7 @@ records, err := dbkit.Table("users").
 // SQL: SELECT users.name, orders.total FROM users LEFT JOIN orders ON users.id = orders.user_id WHERE orders.status = ?
 // Args: ["completed"]
 
-// Multiple INNER JOINs
+// Multi-table INNER JOIN
 records, err := dbkit.Table("orders").
     Select("orders.id, users.name, products.name as product_name").
     InnerJoin("users", "orders.user_id = users.id").
@@ -1107,7 +1178,7 @@ records, err := dbkit.Table("orders").
 //      WHERE orders.status = ? ORDER BY orders.created_at DESC
 // Args: ["completed"]
 
-// JOIN with parameterized condition
+// JOIN condition with parameters
 records, err := dbkit.Table("users").
     Join("orders", "users.id = orders.user_id AND orders.status = ?", "active").
     Find()
@@ -1121,15 +1192,15 @@ records, err := dbkit.Table("users").
 ```go
 func NewSubquery() *Subquery
 ```
-Creates a new subquery builder.
+Create a new subquery builder.
 
 #### Subquery Methods
 ```go
 func (s *Subquery) Table(name string) *Subquery                           // Set table name
-func (s *Subquery) Select(columns string) *Subquery                       // Set columns
+func (s *Subquery) Select(columns string) *Subquery                       // Set select columns
 func (s *Subquery) Where(condition string, args ...interface{}) *Subquery // Add condition
-func (s *Subquery) OrderBy(orderBy string) *Subquery                      // Order by
-func (s *Subquery) Limit(limit int) *Subquery                             // Limit
+func (s *Subquery) OrderBy(orderBy string) *Subquery                      // Sort
+func (s *Subquery) Limit(limit int) *Subquery                             // Limit quantity
 func (s *Subquery) ToSQL() (string, []interface{})                        // Generate SQL
 ```
 
@@ -1139,9 +1210,9 @@ func (b *QueryBuilder) WhereIn(column string, sub *Subquery) *QueryBuilder    //
 func (b *QueryBuilder) WhereNotIn(column string, sub *Subquery) *QueryBuilder // WHERE column NOT IN (subquery)
 ```
 
-**Examples:**
+**Example:**
 ```go
-// Find users with completed orders
+// Query users who have completed orders
 activeUsersSub := dbkit.NewSubquery().
     Table("orders").
     Select("DISTINCT user_id").
@@ -1154,7 +1225,7 @@ users, err := dbkit.Table("users").
 // SQL: SELECT * FROM users WHERE id IN (SELECT DISTINCT user_id FROM orders WHERE status = ?)
 // Args: ["completed"]
 
-// Find orders from non-banned users
+// Query orders of users who are not banned
 bannedUsersSub := dbkit.NewSubquery().
     Table("users").
     Select("id").
@@ -1171,11 +1242,11 @@ orders, err := dbkit.Table("orders").
 ```go
 func (b *QueryBuilder) TableSubquery(sub *Subquery, alias string) *QueryBuilder
 ```
-Uses a subquery as the FROM source (derived table).
+Use subquery as FROM data source (derived table).
 
 **Example:**
 ```go
-// Query from aggregated subquery
+// Query from aggregate subquery
 userTotalsSub := dbkit.NewSubquery().
     Table("orders").
     Select("user_id, SUM(total) as total_spent")
@@ -1193,7 +1264,7 @@ records, err := (&dbkit.QueryBuilder{}).
 ```go
 func (b *QueryBuilder) SelectSubquery(sub *Subquery, alias string) *QueryBuilder
 ```
-Adds a subquery as a field in the SELECT clause.
+Add subquery as a column in SELECT clause.
 
 **Example:**
 ```go
@@ -1217,11 +1288,11 @@ users, err := dbkit.Table("users").
 ```go
 func (b *QueryBuilder) OrWhere(condition string, args ...interface{}) *QueryBuilder
 ```
-Adds an OR condition to the query. When combined with Where, AND conditions are wrapped in parentheses to maintain correct precedence.
+Add OR condition to query. When used with Where, AND conditions will be wrapped in parentheses to maintain correct precedence.
 
-**Examples:**
+**Example:**
 ```go
-// Find orders with status active OR priority high
+// Query orders with active status or high priority
 orders, err := dbkit.Table("orders").
     Where("status = ?", "active").
     OrWhere("priority = ?", "high").
@@ -1246,11 +1317,11 @@ type WhereGroupFunc func(qb *QueryBuilder) *QueryBuilder
 func (b *QueryBuilder) WhereGroup(fn WhereGroupFunc) *QueryBuilder
 func (b *QueryBuilder) OrWhereGroup(fn WhereGroupFunc) *QueryBuilder
 ```
-Adds grouped conditions with nested parentheses. `WhereGroup` connects with AND, `OrWhereGroup` connects with OR.
+Add grouped conditions, supporting nested parentheses. `WhereGroup` uses AND connection, `OrWhereGroup` uses OR connection.
 
-**Examples:**
+**Example:**
 ```go
-// OR grouped condition
+// OR group condition
 records, err := dbkit.Table("table").
     Where("a = ?", 1).
     OrWhereGroup(func(qb *dbkit.QueryBuilder) *dbkit.QueryBuilder {
@@ -1260,7 +1331,7 @@ records, err := dbkit.Table("table").
 // SQL: SELECT * FROM table WHERE (a = ?) OR (b = ? OR c = ?)
 // Args: [1, 1, 1]
 
-// AND grouped condition
+// AND group condition
 records, err := dbkit.Table("orders").
     Where("status = ?", "active").
     WhereGroup(func(qb *dbkit.QueryBuilder) *dbkit.QueryBuilder {
@@ -1289,11 +1360,11 @@ records, err := dbkit.Table("table").
 func (b *QueryBuilder) WhereInValues(column string, values []interface{}) *QueryBuilder
 func (b *QueryBuilder) WhereNotInValues(column string, values []interface{}) *QueryBuilder
 ```
-IN/NOT IN query with a list of values (distinct from subquery versions WhereIn/WhereNotIn).
+Use value list for IN/NOT IN query (distinguished from subquery version WhereIn/WhereNotIn).
 
-**Examples:**
+**Example:**
 ```go
-// Find users with specific IDs
+// Query users with specific IDs
 users, err := dbkit.Table("users").
     WhereInValues("id", []interface{}{1, 2, 3, 4, 5}).
     Find()
@@ -1313,18 +1384,18 @@ orders, err := dbkit.Table("orders").
 func (b *QueryBuilder) WhereBetween(column string, min, max interface{}) *QueryBuilder
 func (b *QueryBuilder) WhereNotBetween(column string, min, max interface{}) *QueryBuilder
 ```
-Range queries.
+Range query.
 
-**Examples:**
+**Example:**
 ```go
-// Find users aged between 18-65
+// Query users aged between 18 and 65
 users, err := dbkit.Table("users").
     WhereBetween("age", 18, 65).
     Find()
 // SQL: SELECT * FROM users WHERE age BETWEEN ? AND ?
 // Args: [18, 65]
 
-// Find products with price not between 100-500
+// Query products with price not between 100 and 500
 products, err := dbkit.Table("products").
     WhereNotBetween("price", 100, 500).
     Find()
@@ -1344,18 +1415,18 @@ orders, err := dbkit.Table("orders").
 func (b *QueryBuilder) WhereNull(column string) *QueryBuilder
 func (b *QueryBuilder) WhereNotNull(column string) *QueryBuilder
 ```
-NULL value checks.
+NULL value check.
 
-**Examples:**
+**Example:**
 ```go
-// Find users without email
+// Query users without email
 users, err := dbkit.Table("users").
     WhereNull("email").
     Find()
 // SQL: SELECT * FROM users WHERE email IS NULL
 // Args: []
 
-// Find users with phone number
+// Query users with phone number
 users, err := dbkit.Table("users").
     WhereNotNull("phone").
     Find()
@@ -1369,17 +1440,17 @@ users, err := dbkit.Table("users").
 ```go
 func (b *QueryBuilder) GroupBy(columns string) *QueryBuilder
 ```
-Adds a GROUP BY clause.
+Add GROUP BY clause.
 
 #### Having
 ```go
 func (b *QueryBuilder) Having(condition string, args ...interface{}) *QueryBuilder
 ```
-Adds a HAVING clause to filter grouped results.
+Add HAVING clause to filter grouped results.
 
-**Examples:**
+**Example:**
 ```go
-// Group orders by status
+// Group orders by status and count
 stats, err := dbkit.Table("orders").
     Select("status, COUNT(*) as count, SUM(total) as total_amount").
     GroupBy("status").
@@ -1387,7 +1458,7 @@ stats, err := dbkit.Table("orders").
 // SQL: SELECT status, COUNT(*) as count, SUM(total) as total_amount FROM orders GROUP BY status
 // Args: []
 
-// Find users with more than 5 orders
+// Query users with more than 5 orders
 users, err := dbkit.Table("orders").
     Select("user_id, COUNT(*) as order_count").
     GroupBy("user_id").
@@ -1438,7 +1509,7 @@ results, err := dbkit.Table("orders").
 func GenerateDbModel(tablename, outPath, structName string) error
 func (db *DB) GenerateDbModel(tablename, outPath, structName string) error
 ```
-Generates Go struct code from database table.
+Generate Go struct code from database table.
 
 **Parameters:**
 - `tablename`: Table name
@@ -1478,63 +1549,63 @@ func PaginateModel[T IDbModel](model T, cache *ModelCache, page, pageSize int, w
 ```go
 func SetCache(c CacheProvider)
 ```
-Sets the global cache provider.
+Set global cache provider.
 
 ### GetCache
 ```go
 func GetCache() CacheProvider
 ```
-Gets the current cache provider.
+Get current cache provider.
 
 ### SetLocalCacheConfig
 ```go
 func SetLocalCacheConfig(cleanupInterval time.Duration)
 ```
-Configures local cache cleanup interval.
+Configure local cache cleanup interval.
 
 ### CreateCache
 ```go
 func CreateCache(cacheName string, ttl time.Duration)
 ```
-Creates a named cache with default TTL.
+Create named cache and set default TTL.
 
 ### CacheSet
 ```go
 func CacheSet(cacheName, key string, value interface{}, ttl ...time.Duration)
 ```
-Sets a cache value.
+Set cache value.
 
 ### CacheGet
 ```go
 func CacheGet(cacheName, key string) (interface{}, bool)
 ```
-Gets a cache value.
+Get cache value.
 
 ### CacheDelete
 ```go
 func CacheDelete(cacheName, key string)
 ```
-Deletes a cache key.
+Delete cache key.
 
 ### CacheClear
 ```go
 func CacheClear(cacheName string)
 ```
-Clears a specific cache.
+Clear specified cache.
 
 ### CacheStatus
 ```go
 func CacheStatus() map[string]interface{}
 ```
-Gets cache status information.
+Get cache status information.
 
-### Cache (Chaining)
+### Cache (Chain Call)
 ```go
 func Cache(name string, ttl ...time.Duration) *DB
 func (db *DB) Cache(name string, ttl ...time.Duration) *DB
 func (tx *Tx) Cache(name string, ttl ...time.Duration) *Tx
 ```
-Enables caching for queries.
+Enable cache for query.
 
 **Example:**
 ```go
@@ -1554,25 +1625,25 @@ type CacheProvider interface {
 
 ---
 
-## Logging Configuration
+## Log Configuration
 
 ### SetDebugMode
 ```go
 func SetDebugMode(enabled bool)
 ```
-Enables/disables debug mode (SQL output).
+Enable/Disable debug mode (outputs SQL statements).
 
 ### SetLogger
 ```go
 func SetLogger(l Logger)
 ```
-Sets a custom logger.
+Set custom logger.
 
 ### InitLoggerWithFile
 ```go
 func InitLoggerWithFile(level string, filePath string)
 ```
-Initializes file logging.
+Initialize file logging.
 
 ### Logger Interface
 ```go
@@ -1591,7 +1662,7 @@ const (
 )
 ```
 
-### Logging Functions
+### Log Functions
 ```go
 func LogDebug(msg string, fields map[string]interface{})
 func LogInfo(msg string, fields map[string]interface{})
@@ -1607,61 +1678,61 @@ func LogError(msg string, fields map[string]interface{})
 ```go
 func ToJson(v interface{}) string
 ```
-Converts any value to JSON string.
+Convert any value to JSON string.
 
 ### ToStruct
 ```go
 func ToStruct(record *Record, dest interface{}) error
 ```
-Converts Record to struct.
+Convert Record to struct.
 
 ### ToStructs
 ```go
 func ToStructs(records []Record, dest interface{}) error
 ```
-Converts Record slice to struct slice.
+Convert Record slice to struct slice.
 
 ### ToRecord
 ```go
 func ToRecord(model interface{}) *Record
 ```
-Converts struct to Record.
+Convert struct to Record.
 
 ### FromStruct
 ```go
 func FromStruct(src interface{}, record *Record) error
 ```
-Populates Record from struct.
+Populate Record from struct.
 
 ### SnakeToCamel
 ```go
 func SnakeToCamel(s string) string
 ```
-Converts snake_case to CamelCase.
+Snake case to Camel case.
 
 ### ValidateTableName
 ```go
 func ValidateTableName(table string) error
 ```
-Validates table name.
+Validate if table name is legal.
 
 ### GenerateCacheKey
 ```go
 func GenerateCacheKey(dbName, sql string, args ...interface{}) string
 ```
-Generates cache key.
+Generate cache key.
 
 ### SupportedDrivers
 ```go
 func SupportedDrivers() []DriverType
 ```
-Returns list of supported database drivers.
+Return list of supported database drivers.
 
 ### IsValidDriver
 ```go
 func IsValidDriver(driver DriverType) bool
 ```
-Checks if driver is supported.
+Check if driver is supported.
 
 ---
 

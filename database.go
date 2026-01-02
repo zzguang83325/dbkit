@@ -2356,27 +2356,6 @@ func (db *DB) EnableOptimisticLockCheck() *DB {
 	return db.EnableOptimisticLock()
 }
 
-// EnableFeatureChecks enables all features at once.
-// This is a convenience function to enable all features at once.
-func EnableFeatureChecks() {
-	EnableTimestamps()
-	EnableOptimisticLock()
-	EnableSoftDelete()
-}
-
-// EnableFeatureChecks enables all features for this database instance.
-func (db *DB) EnableFeatureChecks() *DB {
-	if db.lastErr != nil {
-		return db
-	}
-	db.dbMgr.mu.Lock()
-	defer db.dbMgr.mu.Unlock()
-	db.dbMgr.enableTimestampCheck = true
-	db.dbMgr.enableOptimisticLockCheck = true
-	db.dbMgr.enableSoftDeleteCheck = true
-	return db
-}
-
 // EnableSoftDelete enables soft delete in query operations.
 // When enabled, queries will automatically filter out soft-deleted records.
 // Default is false (disabled) for better performance.

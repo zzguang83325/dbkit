@@ -348,28 +348,31 @@ func (db *DB) UpdateFast(table string, record *Record, whereSql string, whereArg
    }
    ```
 
-3. **无需特性检查的表**: 表本身不需要时间戳或乐观锁功能
+3. 表本身不需要时间戳或乐观锁功能
+   
    ```go
    // 更新配置表（不需要时间戳）
    record := dbkit.NewRecord().Set("value", "new_value")
    dbkit.UpdateFast("config", record, "key = ?", "app_version")
-   ```
-
-4. **已启用特性检查但某些操作需要跳过**: 全局启用了特性检查，但特定操作需要最大性能
-   ```go
-   // 全局启用了特性检查
-   dbkit.EnableFeatureChecks()
+```
    
-   // 但某些高频操作需要跳过检查
+4. **已启用时间戳、乐观锁等功能但某些操作需要跳过**: 
+   
+   ```go
+   
+   dbkit.EnableTimestamp()
+   
+   // 但某些高频操作需要跳过
    record := dbkit.NewRecord().Set("view_count", viewCount)
    dbkit.UpdateFast("articles", record, "id = ?", articleId)
    ```
 
 **性能对比:**
-- 当特性检查关闭时，`Update` 和 `UpdateFast` 性能相同
-- 当特性检查启用时，`UpdateFast` 比 `Update` 快约 2-3 倍
+- 当时间戳 、 软删除、乐观锁等功能关闭时，`Update` 和 `UpdateFast` 性能相同
+- 时间戳 、 软删除、乐观锁等功能`UpdateFast` 比 `Update` 快约 2-3 倍
 
 **注意事项:**
+
 - `UpdateFast` 不会自动更新 `updated_at` 字段
 - `UpdateFast` 不会进行乐观锁版本检查
 - 如果需要这些功能，请使用 `Update` 并启用相应的特性检查
@@ -618,7 +621,7 @@ deletedUsers, _ := user.FindOnlyTrashed("", "id DESC")
 
 自动时间戳功能允许在插入和更新记录时自动填充时间戳字段，无需手动设置。
 
-**性能说明:** DBKit 默认关闭自动时间戳功能以获得最佳性能。如需启用，请使用 `EnableTimestamps()` 或 `EnableFeatureChecks()`。
+**性能说明:** DBKit 默认关闭自动时间戳功能以获得最佳性能。如需启用，请使用 `EnableTimestamps()` 。
 
 ### EnableTimestamps
 ```go
@@ -785,7 +788,7 @@ dbkit.Delete("users", "id = ?", 1)
 
 乐观锁是一种并发控制机制，通过版本号字段检测并发更新冲突，防止数据被意外覆盖。
 
-**性能说明:** DBKit 默认关闭乐观锁功能以获得最佳性能。如需启用，请使用 `EnableOptimisticLock()` 或 `EnableFeatureChecks()`。
+**性能说明:** DBKit 默认关闭乐观锁功能以获得最佳性能。如需启用，请使用 `EnableOptimisticLock()` 。
 
 ### EnableOptimisticLock
 ```go
@@ -801,22 +804,6 @@ dbkit.EnableOptimisticLock()
 
 // 多数据库模式
 dbkit.Use("main").EnableOptimisticLock()
-```
-
-### EnableFeatureChecks
-```go
-func EnableFeatureChecks()
-func (db *DB) EnableFeatureChecks() *DB
-```
-同时启用时间戳检查和乐观锁检查功能。
-
-**示例:**
-```go
-// 全局启用所有特性检查
-dbkit.EnableFeatureChecks()
-
-// 多数据库模式
-dbkit.Use("main").EnableFeatureChecks()
 ```
 
 ### 工作原理

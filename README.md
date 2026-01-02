@@ -70,9 +70,6 @@ dbkit.EnableOptimisticLock()
 
 // 启用软删除功能
 dbkit.EnableSoftDelete()
-
-// 同时启用所有功能
-dbkit.EnableFeatureChecks()
 ```
 
 ## 安装
