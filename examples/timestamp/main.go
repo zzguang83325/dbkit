@@ -30,6 +30,9 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Enable timestamp check first
+	dbkit.EnableTimestampCheck()
+
 	// Configure auto timestamps for users table
 	dbkit.ConfigTimestamps("users")
 
@@ -54,7 +57,6 @@ func main() {
 	updateRecord.Set("name", "John Updated")
 	dbkit.Update("users", updateRecord, "id = ?", id)
 	printUser(id)
-
 
 	// 3. Insert with custom timestamp (won't be overwritten)
 	fmt.Println("\n3. Inserting with custom created_at (won't be overwritten)...")

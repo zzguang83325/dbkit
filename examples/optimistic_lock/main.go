@@ -30,6 +30,9 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Enable optimistic lock check first
+	dbkit.EnableOptimisticLockCheck()
+
 	// Configure optimistic lock for products table
 	dbkit.ConfigOptimisticLock("products")
 
