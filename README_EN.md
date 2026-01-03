@@ -70,7 +70,6 @@ dbkit.EnableOptimisticLock()
 
 // Enable soft delete
 dbkit.EnableSoftDelete()
-
 ```
 
 ## Installation
@@ -485,7 +484,7 @@ dbkit.CacheClear("my_store")
 
 Auto timestamps automatically populate timestamp fields on insert and update operations without manual setting.
 
-**Performance Note**: DBKit disables auto timestamp checks by default for optimal performance. Enable it when needed:
+**Note**: DBKit disables auto timestamp checks by default for optimal performance. Enable it when needed:
 
 ```go
 // Enable timestamp auto-update
@@ -528,7 +527,7 @@ dbkit.Table("users").Where("id = ?", 1).WithoutTimestamps().Update(record)
 
 ### 7. Soft Delete
 
-**Performance Note**: DBKit disables soft delete checks by default for optimal performance. To enable this feature:
+**Note**: DBKit disables soft delete checks by default for optimal performance. To enable this feature:
 
 ```go
 // Enable soft delete

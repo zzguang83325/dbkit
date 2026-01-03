@@ -319,7 +319,7 @@ Update records based on conditions.
 
 **Returns:** Number of rows affected.
 
-**Performance Note:** DBKit disables automatic timestamp updates and optimistic locking by default for best performance. To enable these features, use `EnableTimestamps()` or `EnableOptimisticLock()`.
+**Note:** DBKit disables timestamp auto-update, optimistic lock, and soft delete by default for optimal performance. To enable these features, use `EnableTimestamps()`, `EnableOptimisticLock()`, and `EnableSoftDelete()` respectively.
 
 ### UpdateFast
 ```go
@@ -427,7 +427,7 @@ Delete record based on the primary key in Record.
 
 Soft delete marks records as deleted instead of physically removing them, facilitating data recovery and auditing.
 
-**Performance Note**: DBKit disables soft delete by default for best performance. To use this feature, enable it first:
+**Note**: DBKit disables soft delete by default for best performance. To use this feature, enable it first:
 
 ```go
 // Enable soft delete feature
@@ -621,7 +621,7 @@ deletedUsers, _ := user.FindOnlyTrashed("", "id DESC")
 
 Automatic timestamps feature allows automatically populating timestamp fields during record insertion and update, without manual setting.
 
-**Performance Note:** DBKit disables automatic timestamps by default for best performance. To enable, use `EnableTimestamps()`.
+**Note:** DBKit disables automatic timestamps by default for best performance. To enable, use `EnableTimestamps()`.
 
 ### EnableTimestamps
 ```go
@@ -788,7 +788,7 @@ dbkit.Delete("users", "id = ?", 1)
 
 Optimistic lock is a concurrency control mechanism that uses a version number field to detect concurrent update conflicts and prevent data from being accidentally overwritten.
 
-**Performance Note:** DBKit disables optimistic locking by default for best performance. To enable, use `EnableOptimisticLock()`.
+**Note:** DBKit disables optimistic locking by default for best performance. To enable, use `EnableOptimisticLock()`.
 
 ### EnableOptimisticLock
 ```go
