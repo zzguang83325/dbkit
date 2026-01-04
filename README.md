@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | [API 手册](api.md) | [API Reference](api_en.md)
 
-DBKit 是一个基于 Go 语言的高性能、轻量级数据库操作库，灵感来自 Java 中 JFinal 框架的 ActiveRecord 模式。它提供了极其简洁、直观的 API，通过 `Record` 和DbModel，让数据库操作变得像操作对象一样简单。 
+DBKit 是一个基于 Go 语言的高性能、轻量级数据库操作工具包，灵感来自 Java 中 JFinal 框架的 ActiveRecord 模式。它提供了极其简洁、直观的 API，通过 `Record` 和DbModel，让数据库操作变得像操作对象一样简单。 
 
 **项目链接**：https://github.com/zzguang83325/dbkit.git 
 
@@ -285,6 +285,12 @@ DBKit 提供了针对各种数据库的详细示例，您可以在 `examples/` �
 - `examples/sqlite/` - SQLite 数据库使用示例
 - `examples/oracle/` - Oracle 数据库使用示例
 - `examples/sqlserver/` - SQL Server 数据库使用示例
+- `examples/cache_redis/` - Redis缓存使用示例
+- `examples/log/` - Sql日志使用示例
+- `examples/soft_delete/` - 软删除使用示例
+- `examples/timestamp/` - 自动时间戳使用示例
+- `examples/optimistic_lock/` - 乐观锁使用示例
+- `examples/comprehensive/` - 综合使用示例
 
 您可以通过运行以下命令来测试这些示例：
 
