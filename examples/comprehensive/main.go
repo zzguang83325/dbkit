@@ -10,7 +10,10 @@ import (
 	"github.com/zzguang83325/dbkit/examples/comprehensive/models"
 )
 
+// main is the entry point of the comprehensive DBKit API test example.
+// 主函数：DBKit 综合 API 测试示例的入口点
 func main() {
+	// 1. Initialize database connection - MySQL
 	// 1. 初始化数据库连接 - MySQL
 	dsn := "root:123456@tcp(127.0.0.1:3306)/test?charset=utf8mb4&parseTime=True&loc=Local"
 	err := dbkit.OpenDatabase(dbkit.MySQL, dsn, 10)
@@ -19,19 +22,24 @@ func main() {
 	}
 	defer dbkit.Close()
 
+	// Enable Debug mode to output SQL statements
 	// 开启 Debug 模式输出 SQL
 	dbkit.SetDebugMode(true)
 
 	fmt.Println("\n" + repeat("=", 60))
+	fmt.Println("DBKit Comprehensive API Test Example")
 	fmt.Println("DBKit 综合 API 测试示例")
 	fmt.Println(repeat("=", 60))
 
+	// 2. Initialize environment (create tables)
 	// 2. 初始化环境 (创建表)
 	setupTables()
 
+	// 3. Prepare test data
 	// 3. 准备测试数据
 	prepareData()
 
+	// Run all tests
 	// 运行所有测试
 	testBasicCRUD()
 	testChainQuery()
@@ -49,15 +57,19 @@ func main() {
 	testDbModel()
 
 	fmt.Println("\n" + repeat("=", 60))
+	fmt.Println("All tests completed!")
 	fmt.Println("所有测试完成!")
 	fmt.Println(repeat("=", 60))
 }
 
-// ==================== 基础 CRUD 测试 ====================
+// ==================== Basic CRUD Test ====================
+// ==================== 基础 CRUD 操作测试 ====================
 func testBasicCRUD() {
+	fmt.Println("\n[Test 1: Basic CRUD Operations]")
 	fmt.Println("\n[测试 1: 基础 CRUD 操作]")
 
-	// Insert
+	// Insert - Create a new record
+	// Insert - 创建新记录
 	user := dbkit.NewRecord().
 		Set("username", "TestUser").
 		Set("email", "test@example.com").
@@ -66,59 +78,67 @@ func testBasicCRUD() {
 		Set("created_at", time.Now())
 	id, err := dbkit.Insert("users", user)
 	if err != nil {
-		log.Printf("  Insert 失败: %v", err)
+		log.Printf("  Insert failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ Insert 成功, ID: %d\n", id)
+		fmt.Printf("  ✓ Insert successful, ID: %d\n", id)
 	}
 
-	// Query
+	// Query - Retrieve a single record
+	// Query - 查询单条记录
 	record, err := dbkit.QueryFirst("SELECT * FROM users WHERE id = ?", id)
 	if err != nil {
-		log.Printf("  QueryFirst 失败: %v", err)
+		log.Printf("  QueryFirst failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ QueryFirst 成功: username=%s, age=%d\n", record.Str("username"), record.Int("age"))
+		fmt.Printf("  ✓ QueryFirst successful: username=%s, age=%d\n", record.Str("username"), record.Int("age"))
 	}
 
-	// Update
+	// Update - Modify an existing record
+	// Update - 修改现有记录
 	record.Set("age", 26)
 	affected, err := dbkit.Update("users", record, "id = ?", id)
 	if err != nil {
-		log.Printf("  Update 失败: %v", err)
+		log.Printf("  Update failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ Update 成功, 影响行数: %d\n", affected)
+		fmt.Printf("  ✓ Update successful, affected rows: %d\n", affected)
 	}
 
-	// Save (update existing)
+	// Save - Smart insert or update (update if exists, insert if not)
+	// Save - 智能插入或更新（存在则更新，不存在则插入）
 	record.Set("age", 27)
 	_, err = dbkit.Save("users", record)
 	if err != nil {
-		log.Printf("  Save 失败: %v", err)
+		log.Printf("  Save failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ Save 成功 (更新)\n")
+		fmt.Printf("  ✓ Save successful (update)\n")
 	}
 
-	// Count
+	// Count - Count records matching condition
+	// Count - 统计符合条件的记录
 	count, err := dbkit.Count("users", "status = ?", "active")
 	if err != nil {
-		log.Printf("  Count 失败: %v", err)
+		log.Printf("  Count failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ Count 成功: %d 条记录\n", count)
+		fmt.Printf("  ✓ Count successful: %d records\n", count)
 	}
 
-	// Exists
+	// Exists - Check if record exists
+	// Exists - 检查记录是否存在
 	exists, err := dbkit.Exists("users", "username = ?", "TestUser")
 	if err != nil {
-		log.Printf("  Exists 失败: %v", err)
+		log.Printf("  Exists failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ Exists 成功: %v\n", exists)
+		fmt.Printf("  ✓ Exists successful: %v\n", exists)
 	}
 }
 
+// ==================== Chain Query Test ====================
 // ==================== 链式查询测试 ====================
 func testChainQuery() {
+	fmt.Println("\n[Test 2: Chain Query (QueryBuilder)]")
 	fmt.Println("\n[测试 2: 链式查询 (QueryBuilder)]")
 
-	// 基本链式查询
+	// Basic chain query with multiple conditions
+	// 基本链式查询，包含多个条件
 	users, err := dbkit.Table("users").
 		Select("id, username, age, status").
 		Where("age > ?", 20).
@@ -127,54 +147,60 @@ func testChainQuery() {
 		Limit(5).
 		Find()
 	if err != nil {
-		log.Printf("  链式查询失败: %v", err)
+		log.Printf("  Chain query failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 基本链式查询成功, 返回 %d 条记录\n", len(users))
+		fmt.Printf("  ✓ Basic chain query successful, returned %d records\n", len(users))
 		for i := range users {
 			fmt.Printf("    - %s (age: %d)\n", users[i].Str("username"), users[i].Int("age"))
 		}
 	}
 
-	// FindFirst
+	// FindFirst - Get the first matching record
+	// FindFirst - 获取第一条匹配的记录
 	user, err := dbkit.Table("users").
 		Where("status = ?", "active").
 		OrderBy("id DESC").
 		FindFirst()
 	if err != nil {
-		log.Printf("  FindFirst 失败: %v", err)
+		log.Printf("  FindFirst failed: %v", err)
 	} else if user != nil {
-		fmt.Printf("  ✓ FindFirst 成功: %s\n", user.Str("username"))
+		fmt.Printf("  ✓ FindFirst successful: %s\n", user.Str("username"))
 	}
 
-	// Offset
+	// Offset - Skip records and get next batch
+	// Offset - 跳过记录并获取下一批
 	users2, err := dbkit.Table("users").
 		OrderBy("id ASC").
 		Limit(3).
 		Offset(2).
 		Find()
 	if err != nil {
-		log.Printf("  Offset 查询失败: %v", err)
+		log.Printf("  Offset query failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ Offset 查询成功, 返回 %d 条记录\n", len(users2))
+		fmt.Printf("  ✓ Offset query successful, returned %d records\n", len(users2))
 	}
 }
 
+// ==================== Advanced WHERE Conditions Test ====================
 // ==================== 高级 WHERE 条件测试 ====================
 func testAdvancedWhere() {
+	fmt.Println("\n[Test 3: Advanced WHERE Conditions]")
 	fmt.Println("\n[测试 3: 高级 WHERE 条件]")
 
-	// OrWhere
+	// OrWhere - OR condition
+	// OrWhere - OR 条件
 	users, err := dbkit.Table("users").
 		Where("status = ?", "active").
 		OrWhere("age > ?", 40).
 		Find()
 	if err != nil {
-		log.Printf("  OrWhere 失败: %v", err)
+		log.Printf("  OrWhere failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ OrWhere 成功: %d 条记录\n", len(users))
+		fmt.Printf("  ✓ OrWhere successful: %d records\n", len(users))
 	}
 
-	// WhereGroup / OrWhereGroup
+	// WhereGroup / OrWhereGroup - Group conditions with parentheses
+	// WhereGroup / OrWhereGroup - 用括号分组条件
 	users2, err := dbkit.Table("users").
 		Where("status = ?", "active").
 		OrWhereGroup(func(qb *dbkit.QueryBuilder) *dbkit.QueryBuilder {
@@ -182,76 +208,86 @@ func testAdvancedWhere() {
 		}).
 		Find()
 	if err != nil {
-		log.Printf("  WhereGroup 失败: %v", err)
+		log.Printf("  WhereGroup failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ OrWhereGroup 成功: %d 条记录\n", len(users2))
+		fmt.Printf("  ✓ OrWhereGroup successful: %d records\n", len(users2))
 	}
 
-	// WhereInValues
+	// WhereInValues - IN query with value list
+	// WhereInValues - 值列表 IN 查询
 	users3, err := dbkit.Table("users").
 		WhereInValues("age", []interface{}{25, 30, 35, 40}).
 		Find()
 	if err != nil {
-		log.Printf("  WhereInValues 失败: %v", err)
+		log.Printf("  WhereInValues failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ WhereInValues 成功: %d 条记录\n", len(users3))
+		fmt.Printf("  ✓ WhereInValues successful: %d records\n", len(users3))
 	}
 
-	// WhereNotInValues
+	// WhereNotInValues - NOT IN query
+	// WhereNotInValues - 值列表 NOT IN 查询
 	users4, err := dbkit.Table("users").
 		WhereNotInValues("status", []interface{}{"banned", "deleted"}).
 		Find()
 	if err != nil {
-		log.Printf("  WhereNotInValues 失败: %v", err)
+		log.Printf("  WhereNotInValues failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ WhereNotInValues 成功: %d 条记录\n", len(users4))
+		fmt.Printf("  ✓ WhereNotInValues successful: %d records\n", len(users4))
 	}
 
-	// WhereBetween
+	// WhereBetween - Range query
+	// WhereBetween - 范围查询
 	users5, err := dbkit.Table("users").
 		WhereBetween("age", 25, 35).
 		Find()
 	if err != nil {
-		log.Printf("  WhereBetween 失败: %v", err)
+		log.Printf("  WhereBetween failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ WhereBetween 成功: %d 条记录\n", len(users5))
+		fmt.Printf("  ✓ WhereBetween successful: %d records\n", len(users5))
 	}
 
-	// WhereNotBetween
+	// WhereNotBetween - Exclude range
+	// WhereNotBetween - 排除范围
 	users6, err := dbkit.Table("users").
 		WhereNotBetween("age", 20, 25).
 		Find()
 	if err != nil {
-		log.Printf("  WhereNotBetween 失败: %v", err)
+		log.Printf("  WhereNotBetween failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ WhereNotBetween 成功: %d 条记录\n", len(users6))
+		fmt.Printf("  ✓ WhereNotBetween successful: %d records\n", len(users6))
 	}
 
-	// WhereNull / WhereNotNull
+	// WhereNotNull - IS NOT NULL check
+	// WhereNotNull - IS NOT NULL 检查
 	users7, err := dbkit.Table("users").
 		WhereNotNull("email").
 		Find()
 	if err != nil {
-		log.Printf("  WhereNotNull 失败: %v", err)
+		log.Printf("  WhereNotNull failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ WhereNotNull 成功: %d 条记录\n", len(users7))
+		fmt.Printf("  ✓ WhereNotNull successful: %d records\n", len(users7))
 	}
 
+	// WhereNull - IS NULL check
+	// WhereNull - IS NULL 检查
 	users8, err := dbkit.Table("users").
 		WhereNull("deleted_at").
 		Find()
 	if err != nil {
-		log.Printf("  WhereNull 失败: %v", err)
+		log.Printf("  WhereNull failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ WhereNull 成功: %d 条记录\n", len(users8))
+		fmt.Printf("  ✓ WhereNull successful: %d records\n", len(users8))
 	}
 }
 
+// ==================== JOIN Query Test ====================
 // ==================== JOIN 查询测试 ====================
 func testJoinQuery() {
+	fmt.Println("\n[Test 4: JOIN Query]")
 	fmt.Println("\n[测试 4: JOIN 查询]")
 
-	// LEFT JOIN
+	// LEFT JOIN - Include all records from left table
+	// LEFT JOIN - 包含左表的所有记录
 	records, err := dbkit.Table("users").
 		Select("users.username, orders.amount, orders.status as order_status").
 		LeftJoin("orders", "users.id = orders.user_id").
@@ -260,15 +296,16 @@ func testJoinQuery() {
 		Limit(5).
 		Find()
 	if err != nil {
-		log.Printf("  LEFT JOIN 失败: %v", err)
+		log.Printf("  LEFT JOIN failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ LEFT JOIN 成功: %d 条记录\n", len(records))
+		fmt.Printf("  ✓ LEFT JOIN successful: %d records\n", len(records))
 		for i := range records {
 			fmt.Printf("    - %s: ¥%.2f (%s)\n", records[i].Str("username"), records[i].Float("amount"), records[i].Str("order_status"))
 		}
 	}
 
-	// INNER JOIN
+	// INNER JOIN - Multiple table join
+	// INNER JOIN - 多表连接
 	records2, err := dbkit.Table("orders").
 		Select("orders.id, users.username, products.name as product_name, order_items.quantity").
 		InnerJoin("users", "orders.user_id = users.id").
@@ -278,40 +315,45 @@ func testJoinQuery() {
 		Limit(5).
 		Find()
 	if err != nil {
-		log.Printf("  多表 INNER JOIN 失败: %v", err)
+		log.Printf("  Multiple INNER JOIN failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 多表 INNER JOIN 成功: %d 条记录\n", len(records2))
+		fmt.Printf("  ✓ Multiple INNER JOIN successful: %d records\n", len(records2))
 	}
 
-	// RIGHT JOIN
+	// RIGHT JOIN - Include all records from right table
+	// RIGHT JOIN - 包含右表的所有记录
 	records3, err := dbkit.Table("users").
 		Select("users.username, orders.amount").
 		RightJoin("orders", "users.id = orders.user_id").
 		Limit(5).
 		Find()
 	if err != nil {
-		log.Printf("  RIGHT JOIN 失败: %v", err)
+		log.Printf("  RIGHT JOIN failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ RIGHT JOIN 成功: %d 条记录\n", len(records3))
+		fmt.Printf("  ✓ RIGHT JOIN successful: %d records\n", len(records3))
 	}
 
-	// JOIN with parameters
+	// JOIN with parameters - Add conditions in JOIN clause
+	// JOIN with parameters - 在 JOIN 子句中添加条件
 	records4, err := dbkit.Table("users").
 		Select("users.username, orders.amount").
 		Join("orders", "users.id = orders.user_id AND orders.status = ?", "COMPLETED").
 		Find()
 	if err != nil {
-		log.Printf("  带参数 JOIN 失败: %v", err)
+		log.Printf("  JOIN with parameters failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 带参数 JOIN 成功: %d 条记录\n", len(records4))
+		fmt.Printf("  ✓ JOIN with parameters successful: %d records\n", len(records4))
 	}
 }
 
+// ==================== Subquery Test ====================
 // ==================== 子查询测试 ====================
 func testSubquery() {
+	fmt.Println("\n[Test 5: Subquery]")
 	fmt.Println("\n[测试 5: 子查询 (Subquery)]")
 
-	// WhereIn with Subquery
+	// WhereIn with Subquery - Find users with completed orders
+	// WhereIn with Subquery - 查找有已完成订单的用户
 	activeUsersSub := dbkit.NewSubquery().
 		Table("orders").
 		Select("DISTINCT user_id").
@@ -322,12 +364,13 @@ func testSubquery() {
 		WhereIn("id", activeUsersSub).
 		Find()
 	if err != nil {
-		log.Printf("  WhereIn 子查询失败: %v", err)
+		log.Printf("  WhereIn subquery failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ WhereIn 子查询成功: %d 条记录 (有已完成订单的用户)\n", len(users))
+		fmt.Printf("  ✓ WhereIn subquery successful: %d records (users with completed orders)\n", len(users))
 	}
 
-	// WhereNotIn with Subquery
+	// WhereNotIn with Subquery - Find orders from non-banned users
+	// WhereNotIn with Subquery - 查找非禁用用户的订单
 	bannedUsersSub := dbkit.NewSubquery().
 		Table("users").
 		Select("id").
@@ -337,29 +380,32 @@ func testSubquery() {
 		WhereNotIn("user_id", bannedUsersSub).
 		Find()
 	if err != nil {
-		log.Printf("  WhereNotIn 子查询失败: %v", err)
+		log.Printf("  WhereNotIn subquery failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ WhereNotIn 子查询成功: %d 条记录\n", len(orders))
+		fmt.Printf("  ✓ WhereNotIn subquery successful: %d records\n", len(orders))
 	}
 
-	// FROM Subquery (TableSubquery)
+	// FROM Subquery - Query from derived table
+	// FROM Subquery - 从派生表查询
 	userTotalsSub := dbkit.NewSubquery().
 		Table("orders").
 		Select("user_id, SUM(amount) as total_spent, COUNT(*) as order_count")
 
 	// Note: MySQL requires GROUP BY in subquery for aggregation
+	// 注意：MySQL 在子查询中需要 GROUP BY 来进行聚合
 	records, err := dbkit.Query(`
 		SELECT user_id, total_spent, order_count 
 		FROM (SELECT user_id, SUM(amount) as total_spent, COUNT(*) as order_count FROM orders GROUP BY user_id) AS user_totals 
 		WHERE total_spent > ?`, 200)
 	if err != nil {
-		log.Printf("  FROM 子查询失败: %v", err)
+		log.Printf("  FROM subquery failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ FROM 子查询成功: %d 条记录\n", len(records))
+		fmt.Printf("  ✓ FROM subquery successful: %d records\n", len(records))
 	}
-	_ = userTotalsSub // 使用变量避免警告
+	_ = userTotalsSub // Use variable to avoid warning / 使用变量避免警告
 
-	// SELECT Subquery
+	// SELECT Subquery - Add subquery result as column
+	// SELECT Subquery - 将子查询结果作为列添加
 	orderCountSub := dbkit.NewSubquery().
 		Table("orders").
 		Select("COUNT(*)").
@@ -371,46 +417,51 @@ func testSubquery() {
 		Limit(5).
 		Find()
 	if err != nil {
-		log.Printf("  SELECT 子查询失败: %v", err)
+		log.Printf("  SELECT subquery failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ SELECT 子查询成功: %d 条记录\n", len(users2))
+		fmt.Printf("  ✓ SELECT subquery successful: %d records\n", len(users2))
 		for i := range users2 {
-			fmt.Printf("    - %s: %d 个订单\n", users2[i].Str("username"), users2[i].Int("order_count"))
+			fmt.Printf("    - %s: %d orders\n", users2[i].Str("username"), users2[i].Int("order_count"))
 		}
 	}
 }
 
+// ==================== GROUP BY / HAVING Test ====================
 // ==================== GROUP BY / HAVING 测试 ====================
 func testGroupByHaving() {
+	fmt.Println("\n[Test 6: GROUP BY / HAVING]")
 	fmt.Println("\n[测试 6: GROUP BY / HAVING]")
 
-	// 基本 GroupBy
+	// Basic GroupBy - Group records and aggregate
+	// 基本 GroupBy - 分组记录并聚合
 	stats, err := dbkit.Table("orders").
 		Select("status, COUNT(*) as count, SUM(amount) as total_amount").
 		GroupBy("status").
 		Find()
 	if err != nil {
-		log.Printf("  GroupBy 失败: %v", err)
+		log.Printf("  GroupBy failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ GroupBy 成功:\n")
+		fmt.Printf("  ✓ GroupBy successful:\n")
 		for i := range stats {
-			fmt.Printf("    - %s: %d 订单, 总金额 ¥%.2f\n", stats[i].Str("status"), stats[i].Int("count"), stats[i].Float("total_amount"))
+			fmt.Printf("    - %s: %d orders, total ¥%.2f\n", stats[i].Str("status"), stats[i].Int("count"), stats[i].Float("total_amount"))
 		}
 	}
 
-	// GroupBy + Having
+	// GroupBy + Having - Filter groups by aggregate condition
+	// GroupBy + Having - 按聚合条件过滤分组
 	userStats, err := dbkit.Table("orders").
 		Select("user_id, COUNT(*) as order_count, SUM(amount) as total_spent").
 		GroupBy("user_id").
 		Having("COUNT(*) >= ?", 2).
 		Find()
 	if err != nil {
-		log.Printf("  GroupBy + Having 失败: %v", err)
+		log.Printf("  GroupBy + Having failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ GroupBy + Having 成功: %d 个用户有 2+ 订单\n", len(userStats))
+		fmt.Printf("  ✓ GroupBy + Having successful: %d users with 2+ orders\n", len(userStats))
 	}
 
-	// 多个 Having 条件
+	// Multiple Having conditions - Apply multiple filters
+	// 多个 Having 条件 - 应用多个过滤器
 	userStats2, err := dbkit.Table("orders").
 		Select("user_id, COUNT(*) as cnt, SUM(amount) as total").
 		GroupBy("user_id").
@@ -418,30 +469,35 @@ func testGroupByHaving() {
 		Having("SUM(amount) > ?", 100).
 		Find()
 	if err != nil {
-		log.Printf("  多 Having 条件失败: %v", err)
+		log.Printf("  Multiple Having conditions failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 多 Having 条件成功: %d 条记录\n", len(userStats2))
+		fmt.Printf("  ✓ Multiple Having conditions successful: %d records\n", len(userStats2))
 	}
 
-	// GroupBy 多列
+	// GroupBy multiple columns - Group by multiple fields
+	// GroupBy 多列 - 按多个字段分组
 	stats2, err := dbkit.Table("orders").
 		Select("user_id, status, COUNT(*) as count").
 		GroupBy("user_id, status").
 		OrderBy("user_id, status").
 		Find()
 	if err != nil {
-		log.Printf("  多列 GroupBy 失败: %v", err)
+		log.Printf("  Multiple column GroupBy failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 多列 GroupBy 成功: %d 条记录\n", len(stats2))
+		fmt.Printf("  ✓ Multiple column GroupBy successful: %d records\n", len(stats2))
 	}
 }
 
+// ==================== Transaction Test ====================
 // ==================== 事务测试 ====================
 func testTransaction() {
+	fmt.Println("\n[Test 7: Transaction Handling]")
 	fmt.Println("\n[测试 7: 事务处理]")
 
-	// 成功的事务
+	// Successful transaction - Auto commit on success
+	// 成功的事务 - 成功时自动提交
 	err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+		// Create user
 		// 创建用户
 		user := dbkit.NewRecord().
 			Set("username", "TransUser").
@@ -454,6 +510,7 @@ func testTransaction() {
 			return err
 		}
 
+		// Create order for user
 		// 为用户创建订单
 		order := dbkit.NewRecord().
 			Set("user_id", uid).
@@ -464,11 +521,12 @@ func testTransaction() {
 		return err
 	})
 	if err != nil {
-		log.Printf("  事务失败: %v", err)
+		log.Printf("  Transaction failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 事务成功: 用户和订单已创建\n")
+		fmt.Printf("  ✓ Transaction successful: user and order created\n")
 	}
 
+	// Chain query in transaction
 	// 事务中的链式查询
 	err = dbkit.Transaction(func(tx *dbkit.Tx) error {
 		users, err := tx.Table("users").
@@ -478,11 +536,12 @@ func testTransaction() {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("  ✓ 事务中链式查询成功: %d 条记录\n", len(users))
+		fmt.Printf("  ✓ Chain query in transaction successful: %d records\n", len(users))
 		return nil
 	})
 
-	// 回滚测试 (故意失败)
+	// Rollback test - Intentionally fail to trigger rollback
+	// 回滚测试 - 故意失败以触发回滚
 	err = dbkit.Transaction(func(tx *dbkit.Tx) error {
 		user := dbkit.NewRecord().
 			Set("username", "RollbackUser").
@@ -493,59 +552,68 @@ func testTransaction() {
 		if err != nil {
 			return err
 		}
+		// Intentionally return error to trigger rollback
 		// 故意返回错误触发回滚
-		return fmt.Errorf("故意触发回滚")
+		return fmt.Errorf("intentionally trigger rollback")
 	})
 	if err != nil {
-		fmt.Printf("  ✓ 事务回滚成功: %v\n", err)
+		fmt.Printf("  ✓ Transaction rollback successful: %v\n", err)
 	}
 }
 
+// ==================== Pagination Test ====================
 // ==================== 分页测试 ====================
 func testPagination() {
+	fmt.Println("\n[Test 8: Pagination Query]")
 	fmt.Println("\n[测试 8: 分页查询]")
 
-	// 链式分页
+	// Chain pagination - Paginate with chain query
+	// 链式分页 - 使用链式查询进行分页
 	page1, err := dbkit.Table("orders").
 		Where("status = ?", "COMPLETED").
 		OrderBy("id DESC").
 		Paginate(1, 5)
 	if err != nil {
-		log.Printf("  链式分页失败: %v", err)
+		log.Printf("  Chain pagination failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 链式分页成功:\n")
-		fmt.Printf("    第 %d 页 / 共 %d 页, 总记录: %d\n", page1.PageNumber, page1.TotalPage, page1.TotalRow)
+		fmt.Printf("  ✓ Chain pagination successful:\n")
+		fmt.Printf("    Page %d / Total %d pages, Total records: %d\n", page1.PageNumber, page1.TotalPage, page1.TotalRow)
 		for i := range page1.List {
-			fmt.Printf("    - 订单 #%d: ¥%.2f\n", page1.List[i].GetInt("id"), page1.List[i].GetFloat("amount"))
+			fmt.Printf("    - Order #%d: ¥%.2f\n", page1.List[i].GetInt("id"), page1.List[i].GetFloat("amount"))
 		}
 	}
 
-	// 第二页
+	// Second page - Get next page of results
+	// 第二页 - 获取下一页结果
 	page2, err := dbkit.Table("orders").
 		Where("status = ?", "COMPLETED").
 		OrderBy("id DESC").
 		Paginate(2, 5)
 	if err != nil {
-		log.Printf("  第二页查询失败: %v", err)
+		log.Printf("  Second page query failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 第二页查询成功: %d 条记录\n", len(page2.List))
+		fmt.Printf("  ✓ Second page query successful: %d records\n", len(page2.List))
 	}
 
-	// 原生分页
+	// Native pagination - Use raw SQL pagination
+	// 原生分页 - 使用原始 SQL 分页
 	page3, err := dbkit.Paginate(1, 10, "id, username, age", "users", "age > ?", "id ASC", 20)
 	if err != nil {
-		log.Printf("  原生分页失败: %v", err)
+		log.Printf("  Native pagination failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 原生分页成功: 第 %d 页, 共 %d 条\n", page3.PageNumber, page3.TotalRow)
+		fmt.Printf("  ✓ Native pagination successful: Page %d, Total %d records\n", page3.PageNumber, page3.TotalRow)
 	}
 }
 
+// ==================== Cache Test ====================
 // ==================== 缓存测试 ====================
 func testCache() {
+	fmt.Println("\n[Test 9: Caching]")
 	fmt.Println("\n[测试 9: 缓存]")
 
 	cacheName := "test_cache"
 
+	// First query (from database)
 	// 第一次查询 (查数据库)
 	start := time.Now()
 	users1, err := dbkit.Table("users").
@@ -554,11 +622,12 @@ func testCache() {
 		Find()
 	elapsed1 := time.Since(start)
 	if err != nil {
-		log.Printf("  第一次查询失败: %v", err)
+		log.Printf("  First query failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 第一次查询 (数据库): %d 条, 耗时 %v\n", len(users1), elapsed1)
+		fmt.Printf("  ✓ First query (database): %d records, elapsed %v\n", len(users1), elapsed1)
 	}
 
+	// Second query (should hit cache)
 	// 第二次查询 (应命中缓存)
 	start = time.Now()
 	users2, err := dbkit.Table("users").
@@ -567,34 +636,39 @@ func testCache() {
 		Find()
 	elapsed2 := time.Since(start)
 	if err != nil {
-		log.Printf("  第二次查询失败: %v", err)
+		log.Printf("  Second query failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 第二次查询 (缓存): %d 条, 耗时 %v\n", len(users2), elapsed2)
+		fmt.Printf("  ✓ Second query (cache): %d records, elapsed %v\n", len(users2), elapsed2)
 	}
 
+	// Manual cache operations
 	// 手动缓存操作
 	dbkit.CacheSet("manual_cache", "key1", "value1", 1*time.Minute)
 	val, ok := dbkit.CacheGet("manual_cache", "key1")
 	if ok {
-		fmt.Printf("  ✓ 手动缓存 Get 成功: %v\n", val)
+		fmt.Printf("  ✓ Manual cache Get successful: %v\n", val)
 	}
 
 	dbkit.CacheDelete("manual_cache", "key1")
 	_, ok = dbkit.CacheGet("manual_cache", "key1")
 	if !ok {
-		fmt.Printf("  ✓ 手动缓存 Delete 成功\n")
+		fmt.Printf("  ✓ Manual cache Delete successful\n")
 	}
 
+	// Cache status
 	// 缓存状态
 	status := dbkit.CacheStatus()
-	fmt.Printf("  ✓ 缓存状态: type=%v, items=%v\n", status["type"], status["total_items"])
+	fmt.Printf("  ✓ Cache status: type=%v, items=%v\n", status["type"], status["total_items"])
 }
 
+// ==================== Batch Operations Test ====================
 // ==================== 批量操作测试 ====================
 func testBatchOperations() {
+	fmt.Println("\n[Test 10: Batch Operations]")
 	fmt.Println("\n[测试 10: 批量操作]")
 
-	// 批量插入
+	// Batch insert - Insert multiple records at once
+	// 批量插入 - 一次插入多条记录
 	var records []*dbkit.Record
 	for i := 0; i < 10; i++ {
 		r := dbkit.NewRecord().
@@ -607,12 +681,13 @@ func testBatchOperations() {
 	}
 	affected, err := dbkit.BatchInsertDefault("users", records)
 	if err != nil {
-		log.Printf("  批量插入失败: %v", err)
+		log.Printf("  Batch insert failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ 批量插入成功: %d 条记录\n", affected)
+		fmt.Printf("  ✓ Batch insert successful: %d records\n", affected)
 	}
 
-	// 批量更新
+	// Batch update - Update multiple records at once
+	// 批量更新 - 一次更新多条记录
 	var updateRecords []*dbkit.Record
 	users, _ := dbkit.Table("users").
 		Where("username LIKE ?", "BatchUser%").
@@ -627,13 +702,14 @@ func testBatchOperations() {
 	if len(updateRecords) > 0 {
 		affected, err = dbkit.BatchUpdateDefault("users", updateRecords)
 		if err != nil {
-			log.Printf("  批量更新失败: %v", err)
+			log.Printf("  Batch update failed: %v", err)
 		} else {
-			fmt.Printf("  ✓ 批量更新成功: %d 条记录\n", affected)
+			fmt.Printf("  ✓ Batch update successful: %d records\n", affected)
 		}
 	}
 
-	// 批量删除 (by IDs)
+	// Batch delete by IDs - Delete multiple records by ID list
+	// 批量删除 (by IDs) - 按 ID 列表删除多条记录
 	ids := []interface{}{}
 	delUsers, _ := dbkit.Table("users").
 		Where("username LIKE ?", "BatchUser%").
@@ -645,23 +721,27 @@ func testBatchOperations() {
 	if len(ids) > 0 {
 		affected, err = dbkit.BatchDeleteByIdsDefault("users", ids)
 		if err != nil {
-			log.Printf("  批量删除失败: %v", err)
+			log.Printf("  Batch delete failed: %v", err)
 		} else {
-			fmt.Printf("  ✓ 批量删除成功: %d 条记录\n", affected)
+			fmt.Printf("  ✓ Batch delete successful: %d records\n", affected)
 		}
 	}
 }
 
+// ==================== Initialize Table Structure ====================
 // ==================== 初始化表结构 ====================
 func setupTables() {
+	fmt.Println("\n[Initialize] Creating test tables...")
 	fmt.Println("\n[初始化] 创建测试表...")
 
+	// Drop old tables
 	// 删除旧表
 	dbkit.Exec("DROP TABLE IF EXISTS order_items")
 	dbkit.Exec("DROP TABLE IF EXISTS orders")
 	dbkit.Exec("DROP TABLE IF EXISTS products")
 	dbkit.Exec("DROP TABLE IF EXISTS users")
 
+	// Users table
 	// 用户表
 	_, err := dbkit.Exec(`CREATE TABLE users (
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -673,9 +753,10 @@ func setupTables() {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	if err != nil {
-		log.Printf("创建 users 表失败: %v", err)
+		log.Printf("Failed to create users table: %v", err)
 	}
 
+	// Products table
 	// 产品表
 	_, err = dbkit.Exec(`CREATE TABLE products (
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -685,9 +766,10 @@ func setupTables() {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	if err != nil {
-		log.Printf("创建 products 表失败: %v", err)
+		log.Printf("Failed to create products table: %v", err)
 	}
 
+	// Orders table
 	// 订单表
 	_, err = dbkit.Exec(`CREATE TABLE orders (
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -697,9 +779,10 @@ func setupTables() {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	if err != nil {
-		log.Printf("创建 orders 表失败: %v", err)
+		log.Printf("Failed to create orders table: %v", err)
 	}
 
+	// Order items table
 	// 订单项表
 	_, err = dbkit.Exec(`CREATE TABLE order_items (
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -709,16 +792,19 @@ func setupTables() {
 		price DECIMAL(10,2) DEFAULT 0
 	)`)
 	if err != nil {
-		log.Printf("创建 order_items 表失败: %v", err)
+		log.Printf("Failed to create order_items table: %v", err)
 	}
 
-	fmt.Println("  ✓ 表创建完成")
+	fmt.Println("  ✓ Tables created successfully")
 }
 
+// ==================== Prepare Test Data ====================
 // ==================== 准备测试数据 ====================
 func prepareData() {
+	fmt.Println("\n[Initialize] Inserting test data...")
 	fmt.Println("\n[初始化] 插入测试数据...")
 
+	// Insert users
 	// 插入用户
 	users := []struct {
 		username string
@@ -744,6 +830,7 @@ func prepareData() {
 		dbkit.Insert("users", record)
 	}
 
+	// Insert products
 	// 插入产品
 	products := []struct {
 		name  string
@@ -765,6 +852,7 @@ func prepareData() {
 		dbkit.Insert("products", record)
 	}
 
+	// Insert orders and order items
 	// 插入订单和订单项
 	orderData := []struct {
 		userID int64
@@ -826,17 +914,22 @@ func prepareData() {
 		}
 	}
 
-	fmt.Println("  ✓ 测试数据插入完成")
+	fmt.Println("  ✓ Test data inserted successfully")
 }
 
+// ==================== Auto Timestamps Test ====================
 // ==================== 自动时间戳测试 ====================
 func testAutoTimestamps() {
+	fmt.Println("\n[Test 11: Auto Timestamps]")
 	fmt.Println("\n[测试 11: 自动时间戳 (Auto Timestamps)]")
 
+	// Enable timestamp auto-update
 	// 启用时间戳自动更新
 	dbkit.EnableTimestamps()
+	fmt.Println("  ✓ Timestamp auto-update enabled")
 	fmt.Println("  ✓ 已启用时间戳自动更新")
 
+	// Create table with timestamp fields
 	// 创建带时间戳的表
 	dbkit.Exec("DROP TABLE IF EXISTS articles")
 	_, err := dbkit.Exec(`CREATE TABLE articles (
@@ -848,12 +941,14 @@ func testAutoTimestamps() {
 		updated_at DATETIME NULL
 	)`)
 	if err != nil {
-		log.Printf("  创建 articles 表失败: %v", err)
+		log.Printf("  Failed to create articles table: %v", err)
 		return
 	}
 
+	// Configure auto timestamps (using default field names)
 	// 配置自动时间戳（使用默认字段名）
 	dbkit.ConfigTimestamps("articles")
+	fmt.Println("  ✓ Auto timestamps configured (created_at, updated_at)")
 	fmt.Println("  ✓ 已配置自动时间戳 (created_at, updated_at)")
 
 	// 测试 1: 插入数据（created_at 自动填充）
@@ -975,14 +1070,19 @@ func testAutoTimestamps() {
 	}
 }
 
+// ==================== Soft Delete Test ====================
 // ==================== 软删除测试 ====================
 func testSoftDelete() {
+	fmt.Println("\n[Test 12: Soft Delete]")
 	fmt.Println("\n[测试 12: 软删除 (Soft Delete)]")
 
+	// Enable soft delete functionality
 	// 启用软删除功能
 	dbkit.EnableSoftDelete()
+	fmt.Println("  ✓ Soft delete enabled")
 	fmt.Println("  ✓ 已启用软删除功能")
 
+	// Create table with soft delete field
 	// 创建带软删除字段的表
 	dbkit.Exec("DROP TABLE IF EXISTS documents")
 	_, err := dbkit.Exec(`CREATE TABLE documents (
@@ -994,22 +1094,26 @@ func testSoftDelete() {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	if err != nil {
-		log.Printf("  创建 documents 表失败: %v", err)
+		log.Printf("  Failed to create documents table: %v", err)
 		return
 	}
 
+	// Configure soft delete
 	// 配置软删除
 	dbkit.ConfigSoftDelete("documents", "deleted_at")
+	fmt.Println("  ✓ Soft delete configured (deleted_at)")
 	fmt.Println("  ✓ 已配置软删除 (deleted_at)")
 
+	// Insert test data
 	// 插入测试数据
 	for i := 1; i <= 5; i++ {
 		doc := dbkit.NewRecord().
-			Set("title", fmt.Sprintf("文档 %d", i)).
-			Set("content", fmt.Sprintf("这是文档 %d 的内容", i)).
+			Set("title", fmt.Sprintf("Document %d", i)).
+			Set("content", fmt.Sprintf("Content of document %d", i)).
 			Set("status", "published")
 		dbkit.Insert("documents", doc)
 	}
+	fmt.Println("  ✓ Inserted 5 documents")
 	fmt.Println("  ✓ 插入 5 条文档")
 
 	// 测试 1: 软删除（自动更新 deleted_at）
@@ -1132,14 +1236,19 @@ func testSoftDelete() {
 	}
 }
 
+// ==================== Optimistic Lock Test ====================
 // ==================== 乐观锁测试 ====================
 func testOptimisticLock() {
+	fmt.Println("\n[Test 13: Optimistic Lock]")
 	fmt.Println("\n[测试 13: 乐观锁 (Optimistic Lock)]")
 
+	// Enable optimistic lock functionality
 	// 启用乐观锁功能
 	dbkit.EnableOptimisticLock()
+	fmt.Println("  ✓ Optimistic lock enabled")
 	fmt.Println("  ✓ 已启用乐观锁功能")
 
+	// Create table with version field
 	// 创建带版本字段的表
 	dbkit.Exec("DROP TABLE IF EXISTS inventory")
 	_, err := dbkit.Exec(`CREATE TABLE inventory (
@@ -1151,12 +1260,14 @@ func testOptimisticLock() {
 		updated_at DATETIME NULL
 	)`)
 	if err != nil {
-		log.Printf("  创建 inventory 表失败: %v", err)
+		log.Printf("  Failed to create inventory table: %v", err)
 		return
 	}
 
+	// Configure optimistic lock (using default field name version)
 	// 配置乐观锁（使用默认字段名 version）
 	dbkit.ConfigOptimisticLock("inventory")
+	fmt.Println("  ✓ Optimistic lock configured (version)")
 	fmt.Println("  ✓ 已配置乐观锁 (version)")
 
 	// 测试 1: 插入数据（version 自动初始化为 1）
@@ -1323,10 +1434,13 @@ func testOptimisticLock() {
 	}
 }
 
+// ==================== DbModel Test ====================
 // ==================== DbModel 测试 ====================
 func testDbModel() {
+	fmt.Println("\n[Test 14: DbModel Operations]")
 	fmt.Println("\n[测试 14: DbModel 模型操作]")
 
+	// Insert using Model
 	// 使用 Model 插入
 	user := &models.User{
 		Username:  "ModelUser",
@@ -1337,73 +1451,81 @@ func testDbModel() {
 	}
 	id, err := user.Insert()
 	if err != nil {
-		log.Printf("  Model Insert 失败: %v", err)
+		log.Printf("  Model Insert failed: %v", err)
 	} else {
 		user.ID = id
-		fmt.Printf("  ✓ Model Insert 成功, ID: %d\n", id)
+		fmt.Printf("  ✓ Model Insert successful, ID: %d\n", id)
 	}
 
+	// Query using Model
 	// 使用 Model 查询
 	userModel := &models.User{}
 	foundUser, err := userModel.FindFirst("username = ?", "ModelUser")
 	if err != nil {
-		log.Printf("  Model FindFirst 失败: %v", err)
+		log.Printf("  Model FindFirst failed: %v", err)
 	} else if foundUser != nil {
-		fmt.Printf("  ✓ Model FindFirst 成功: %s (age: %d)\n", foundUser.Username, foundUser.Age)
+		fmt.Printf("  ✓ Model FindFirst successful: %s (age: %d)\n", foundUser.Username, foundUser.Age)
 	}
 
+	// Update using Model
 	// 使用 Model 更新
 	if foundUser != nil {
 		foundUser.Age = 33
 		affected, err := foundUser.Update()
 		if err != nil {
-			log.Printf("  Model Update 失败: %v", err)
+			log.Printf("  Model Update failed: %v", err)
 		} else {
-			fmt.Printf("  ✓ Model Update 成功, 影响行数: %d\n", affected)
+			fmt.Printf("  ✓ Model Update successful, affected rows: %d\n", affected)
 		}
 	}
 
+	// Find multiple records using Model
 	// 使用 Model Find 查询多条
 	users, err := userModel.Find("status = ?", "id DESC", "active")
 	if err != nil {
-		log.Printf("  Model Find 失败: %v", err)
+		log.Printf("  Model Find failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ Model Find 成功: %d 条记录\n", len(users))
+		fmt.Printf("  ✓ Model Find successful: %d records\n", len(users))
 	}
 
+	// Pagination using Model
 	// 使用 Model 分页
 	page, err := userModel.Paginate(1, 5, "status = ?", "id DESC", "active")
 	if err != nil {
-		log.Printf("  Model Paginate 失败: %v", err)
+		log.Printf("  Model Paginate failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ Model Paginate 成功: 第 %d 页, 共 %d 条\n", page.PageNumber, page.TotalRow)
+		fmt.Printf("  ✓ Model Paginate successful: Page %d, Total %d records\n", page.PageNumber, page.TotalRow)
 	}
 
+	// Cache query using Model
 	// 使用 Model 带缓存查询
 	cachedUsers, err := userModel.Cache("user_cache", 30*time.Second).Find("age > ?", "id ASC", 25)
 	if err != nil {
-		log.Printf("  Model Cache Find 失败: %v", err)
+		log.Printf("  Model Cache Find failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ Model Cache Find 成功: %d 条记录\n", len(cachedUsers))
+		fmt.Printf("  ✓ Model Cache Find successful: %d records\n", len(cachedUsers))
 	}
 
+	// Save using Model (update existing record)
 	// 使用 Model Save (更新已存在记录)
 	if foundUser != nil {
 		foundUser.Age = 34
 		_, err := foundUser.Save()
 		if err != nil {
-			log.Printf("  Model Save 失败: %v", err)
+			log.Printf("  Model Save failed: %v", err)
 		} else {
-			fmt.Printf("  ✓ Model Save 成功\n")
+			fmt.Printf("  ✓ Model Save successful\n")
 		}
 	}
 
+	// Convert Model to JSON
 	// 使用 Model ToJson
 	if foundUser != nil {
 		json := foundUser.ToJson()
 		fmt.Printf("  ✓ Model ToJson: %s\n", json[:min(len(json), 80)]+"...")
 	}
 
+	// Product Model test
 	// Product Model 测试
 	product := &models.Product{
 		Name:      "Test Product",
@@ -1413,11 +1535,12 @@ func testDbModel() {
 	}
 	pid, err := product.Insert()
 	if err != nil {
-		log.Printf("  Product Insert 失败: %v", err)
+		log.Printf("  Product Insert failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ Product Insert 成功, ID: %d\n", pid)
+		fmt.Printf("  ✓ Product Insert successful, ID: %d\n", pid)
 	}
 
+	// Order Model test
 	// Order Model 测试
 	order := &models.Order{
 		UserID:    user.ID,
@@ -1427,11 +1550,12 @@ func testDbModel() {
 	}
 	oid, err := order.Insert()
 	if err != nil {
-		log.Printf("  Order Insert 失败: %v", err)
+		log.Printf("  Order Insert failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ Order Insert 成功, ID: %d\n", oid)
+		fmt.Printf("  ✓ Order Insert successful, ID: %d\n", oid)
 	}
 
+	// OrderItem Model test
 	// OrderItem Model 测试
 	orderItem := &models.OrderItem{
 		OrderID:   oid,
@@ -1441,27 +1565,38 @@ func testDbModel() {
 	}
 	iid, err := orderItem.Insert()
 	if err != nil {
-		log.Printf("  OrderItem Insert 失败: %v", err)
+		log.Printf("  OrderItem Insert failed: %v", err)
 	} else {
-		fmt.Printf("  ✓ OrderItem Insert 成功, ID: %d\n", iid)
+		fmt.Printf("  ✓ OrderItem Insert successful, ID: %d\n", iid)
 	}
 
+	// Delete using Model
 	// 使用 Model Delete
 	if foundUser != nil {
 		affected, err := foundUser.Delete()
 		if err != nil {
-			log.Printf("  Model Delete 失败: %v", err)
+			log.Printf("  Model Delete failed: %v", err)
 		} else {
-			fmt.Printf("  ✓ Model Delete 成功, 影响行数: %d\n", affected)
+			fmt.Printf("  ✓ Model Delete successful, affected rows: %d\n", affected)
 		}
 	}
 }
 
-// 辅助函数
+// Helper function - Repeat string n times
+// 辅助函数 - 重复字符串 n 次
 func repeat(s string, count int) string {
 	result := ""
 	for i := 0; i < count; i++ {
 		result += s
 	}
 	return result
+}
+
+// Helper function - Return minimum of two integers
+// 辅助函数 - 返回两个整数的最小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

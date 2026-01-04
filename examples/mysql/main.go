@@ -11,6 +11,32 @@ import (
 	"github.com/zzguang83325/dbkit/examples/mysql/models"
 )
 
+// ============================================================================
+// DBKit MySQL 综合测试示例
+// ============================================================================
+// 功能演示:
+//   1. 数据库连接和配置
+//   2. Record CRUD 操作（基础 API）
+//   3. DbModel CRUD 操作（模型 API）
+//   4. 链式查询（QueryBuilder）
+//   5. 分页查询
+//   6. 事务处理
+//   7. 缓存机制
+//   8. 批量操作
+//   9. 工具函数
+//
+// 使用场景:
+//   - 学习 DBKit 的各种 API 用法
+//   - 理解 Record 和 DbModel 的区别
+//   - 掌握链式查询的强大功能
+//   - 了解事务和缓存的使用
+//
+// 前置条件:
+//   - MySQL 数据库已启动
+//   - 数据库连接信息正确
+//   - 有相应的数据库和表权限
+// ============================================================================
+
 func main() {
 	fmt.Println("========================================")
 	fmt.Println("   DBKit MySQL 综合测试")
@@ -55,25 +81,48 @@ func main() {
 	fmt.Println("========================================")
 }
 
-// ==================== 1. 数据库连接测试 ====================
+// ============================================================================
+// 1. 数据库连接测试
+// ============================================================================
+// 说明: 演示如何连接 MySQL 数据库并进行基本的连接测试
+// 关键 API:
+//   - OpenDatabaseWithDBName: 使用指定的数据库名称打开连接
+//   - PingDB: 测试数据库连接是否正常
+//   - SetDebugMode: 启用调试模式，输出 SQL 日志
 func testDatabaseConnection() {
 	fmt.Println("\n【1. 数据库连接测试】")
 
+	// MySQL 连接字符串格式: user:password@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True&loc=Local
+	// 参数说明:
+	//   - user: 数据库用户名
+	//   - password: 数据库密码
+	//   - host: 数据库主机地址
+	//   - port: 数据库端口（默认 3306）
+	//   - dbname: 数据库名称
+	//   - charset: 字符集（推荐 utf8mb4）
+	//   - parseTime: 是否解析时间字段
+	//   - loc: 时区设置
 	dsn := "root:123456@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local"
+	
+	// 使用指定的数据库名称打开连接
+	// 参数: 数据库别名, 数据库类型, 连接字符串, 最大连接数
 	err := dbkit.OpenDatabaseWithDBName("mysql", dbkit.MySQL, dsn, 25)
 	if err != nil {
 		log.Fatalf("❌ 数据库连接失败: %v", err)
 	}
 	fmt.Println("✓ 数据库连接成功")
 
-	// 测试 Ping
+	// 测试数据库连接是否正常
+	// 这会发送一个 PING 命令到数据库
 	err = dbkit.PingDB("mysql")
 	if err != nil {
 		log.Fatalf("❌ Ping 失败: %v", err)
 	}
 	fmt.Println("✓ Ping 测试通过")
 
-	// 开启调试模式
+	// 启用调试模式
+	// 启用后，所有 SQL 语句和执行时间都会被打印到日志
+	// 用于开发和调试，生产环境应关闭
 	dbkit.SetDebugMode(true)
 	fmt.Println("✓ 调试模式已开启")
 }

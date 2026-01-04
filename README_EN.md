@@ -457,27 +457,61 @@ tx.Commit()   // or tx.Rollback()
 
 ### 5. Cache Support
 
-```go
-// Use built-in LocalCache (memory)
-dbkit.SetLocalCacheConfig(1 * time.Minute)
+DBKit uses built-in **LocalCache** (memory cache) by default. For Redis support, optionally import the `dbkit/redis` sub-package.
 
-// Use Redis cache
+#### 1. Using Built-in LocalCache (Memory)
+```go
+// Default uses memory cache. Modify cache cleanup interval with the following function
+// Expired cache data will be cleaned up periodically
+dbkit.SetLocalCacheConfig(1 * time.Minute)
+```
+
+#### 2. Using Redis Cache (Optional)
+First ensure your project imports the `dbkit/redis` sub-package, which will pull Redis dependencies.
+
+```go
 import "github.com/zzguang83325/dbkit/redis"
 
+// Create Redis cache instance (parameters: address, username, password, DB)
 rc, err := redis.NewRedisCache("localhost:6379", "username", "password", 1)
 if err == nil {
-    dbkit.SetCache(rc)
+    dbkit.SetCache(rc) // Switch global cache to Redis
 }
+```
 
-// Query with auto caching
+#### 3. Query Data with Auto Caching
+```go
+// Create a cache store and set default expiration time
 dbkit.CreateCache("user_cache", 10*time.Minute)
-records, err := dbkit.Cache("user_cache").Query("SELECT * FROM users")
 
-// Manual cache operations
+// Auto query cache: chain call Cache()
+// If cache hits, return directly; otherwise query database and auto write to cache
+records, err := dbkit.Cache("user_cache").Query("SELECT * FROM users")
+```
+
+#### 4. Manual Cache Operations
+
+```go
+// Store cache
 dbkit.CacheSet("my_store", "key1", "value1", 5*time.Minute)
+
+// Get cache
 val, ok := dbkit.CacheGet("my_store", "key1")
+
+// Delete specific key
 dbkit.CacheDelete("my_store", "key1")
+
+// Clear entire store
 dbkit.CacheClear("my_store")
+```
+
+#### 5. View Cache Status
+
+```go
+status := dbkit.CacheStatus()
+fmt.Printf("Type: %v\n", status["type"])
+fmt.Printf("Total Items: %v\n", status["total_items"])
+fmt.Printf("Estimated Memory: %v\n", status["estimated_memory_human"])
 ```
 
 ### 6. Auto Timestamps
@@ -594,21 +628,251 @@ updateRecord2.Set("price", 799.99)
 dbkit.Update("products", updateRecord2, "id = ?", 1)
 ```
 
-### 9. Logging Configuration
-
+#### Using Optimistic Lock in Transactions
 ```go
-// Enable debug mode
-dbkit.SetDebugMode(true)
-
-// Use file logging
-logFile := filepath.Join(".", "logfile.log")
-dbkit.InitLoggerWithFile("debug", logFile)
-
-// Custom logger (implement Logger interface)
-dbkit.SetLogger(myCustomLogger)
+dbkit.Transaction(func(tx *dbkit.Tx) error {
+    rec, _ := tx.Table("products").Where("id = ?", 1).FindFirst()
+    currentVersion := rec.GetInt("version")
+    
+    updateRec := dbkit.NewRecord()
+    updateRec.Set("version", currentVersion)
+    updateRec.Set("stock", 80)
+    _, err := tx.Update("products", updateRec, "id = ?", 1)
+    return err  // Auto rollback on version conflict
+})
 ```
 
-### 10. Connection Pool Configuration
+### 9. Query Timeout Control
+
+DBKit supports global and per-query timeout settings using Go's standard `context.Context`, automatically canceling queries after timeout.
+
+#### Global Default Timeout
+```go
+config := &dbkit.Config{
+    Driver:       dbkit.MySQL,
+    DSN:          "...",
+    MaxOpen:      10,
+    QueryTimeout: 30 * time.Second,  // All queries default to 30s timeout
+}
+dbkit.OpenDatabaseWithConfig(config)
+```
+
+#### Per-Query Timeout
+```go
+// Method 1: Global function
+users, err := dbkit.Timeout(5 * time.Second).Query("SELECT * FROM users")
+
+// Method 2: Specify database
+users, err := dbkit.Use("default").Timeout(5 * time.Second).Query("SELECT * FROM users")
+
+// Method 3: Chain query
+users, err := dbkit.Table("users").
+    Where("age > ?", 18).
+    Timeout(10 * time.Second).
+    Find()
+```
+
+#### Timeout in Transactions
+```go
+dbkit.Transaction(func(tx *dbkit.Tx) error {
+    // Queries in transactions also support timeout
+    _, err := tx.Timeout(5 * time.Second).Query("SELECT * FROM orders")
+    return err
+})
+```
+
+#### Timeout Error Handling
+```go
+import "context"
+
+users, err := dbkit.Timeout(1 * time.Second).Query("SELECT SLEEP(5)")
+if err != nil {
+    if errors.Is(err, context.DeadlineExceeded) {
+        fmt.Println("Query timeout")
+    }
+}
+```
+
+### 10. Connection Pool Monitoring
+
+DBKit provides connection pool monitoring to view real-time pool usage.
+
+#### Get Pool Statistics
+```go
+// Get default database pool statistics
+stats := dbkit.GetPoolStats()
+fmt.Println(stats.String())
+// Output: PoolStats[default/mysql]: Open=5 (InUse=2, Idle=3), MaxOpen=10, WaitCount=0, WaitDuration=0s
+
+// Get specific database pool statistics
+stats := dbkit.GetPoolStatsDB("postgresql")
+
+// Get all database pool statistics
+allStats := dbkit.AllPoolStats()
+for name, stats := range allStats {
+    fmt.Printf("%s: %s\n", name, stats.String())
+}
+```
+
+#### PoolStats Structure
+```go
+type PoolStats struct {
+    DBName             string        // Database name
+    Driver             string        // Driver type
+    MaxOpenConnections int           // Maximum connections (configured)
+    OpenConnections    int           // Current open connections
+    InUse              int           // Connections in use
+    Idle               int           // Idle connections
+    WaitCount          int64         // Total wait count
+    WaitDuration       time.Duration // Total wait duration
+    MaxIdleClosed      int64         // Connections closed due to max idle
+    MaxLifetimeClosed  int64         // Connections closed due to max lifetime
+}
+```
+
+#### Convert to Map (for JSON serialization)
+```go
+stats := dbkit.GetPoolStats()
+statsMap := stats.ToMap()
+jsonBytes, _ := json.Marshal(statsMap)
+fmt.Println(string(jsonBytes))
+```
+
+#### Export Prometheus Metrics
+```go
+// Single database
+stats := dbkit.GetPoolStats()
+fmt.Println(stats.PrometheusMetrics())
+
+// All databases
+fmt.Println(dbkit.AllPrometheusMetrics())
+```
+
+Output example:
+```
+# HELP dbkit_pool_max_open_connections Maximum number of open connections to the database.
+# TYPE dbkit_pool_max_open_connections gauge
+dbkit_pool_max_open_connections{db="default",driver="mysql"} 10
+
+# HELP dbkit_pool_open_connections The number of established connections both in use and idle.
+# TYPE dbkit_pool_open_connections gauge
+dbkit_pool_open_connections{db="default",driver="mysql"} 5
+
+# HELP dbkit_pool_in_use The number of connections currently in use.
+# TYPE dbkit_pool_in_use gauge
+dbkit_pool_in_use{db="default",driver="mysql"} 2
+
+# HELP dbkit_pool_idle The number of idle connections.
+# TYPE dbkit_pool_idle gauge
+dbkit_pool_idle{db="default",driver="mysql"} 3
+```
+
+### 11. Logging Configuration
+
+DBKit uses the standard library `log` by default. For more powerful logging, you can optionally use the `zap` logging library.
+
+#### 1. Output Logs to Console
+```go
+// Enable Debug mode to output SQL statements
+dbkit.SetDebugMode(true)
+```
+
+#### 2. Using slog Logger
+
+```go
+logFile := filepath.Join(".", "logfile.log")
+dbkit.InitLoggerWithFile("debug", logFile)
+```
+
+#### 3. Using Zap Logger Library
+
+```go
+type ZapAdapter struct {
+    logger *zap.Logger
+}
+
+func (a *ZapAdapter) Log(level dbkit.LogLevel, msg string, fields map[string]interface{}) {
+    var zapFields []zap.Field
+    if len(fields) > 0 {
+        zapFields = make([]zap.Field, 0, len(fields))
+        for k, v := range fields {
+            zapFields = append(zapFields, zap.Any(k, v))
+        }
+    }
+
+    switch level {
+    case dbkit.LevelDebug:
+        a.logger.Debug(msg, zapFields...)
+    case dbkit.LevelInfo:
+        a.logger.Info(msg, zapFields...)
+    case dbkit.LevelWarn:
+        a.logger.Warn(msg, zapFields...)
+    case dbkit.LevelError:
+        a.logger.Error(msg, zapFields...)
+    }
+}
+
+func main() {
+    // 1. Initialize zap logger, output to both console and file
+    cfg := zap.NewDevelopmentConfig()
+    cfg.OutputPaths = []string{"stdout", "logfile.log"}
+
+    zapLogger, _ := cfg.Build()
+    defer zapLogger.Sync()
+
+    // 2. Integrate zap into dbkit
+    dbkit.SetLogger(&ZapAdapter{logger: zapLogger})
+    dbkit.SetDebugMode(true) // Enable debug mode to see SQL traces
+}
+```
+
+#### 4. Using zerolog
+Simply implement the `dbkit.Logger` interface:
+```go
+type ZerologAdapter struct {
+    logger zerolog.Logger
+}
+
+func (a *ZerologAdapter) Log(level dbkit.LogLevel, msg string, fields map[string]interface{}) {
+    var event *zerolog.Event
+    switch level {
+    case dbkit.LevelDebug:
+        event = a.logger.Debug()
+    case dbkit.LevelInfo:
+        event = a.logger.Info()
+    case dbkit.LevelWarn:
+        event = a.logger.Warn()
+    case dbkit.LevelError:
+        event = a.logger.Error()
+    default:
+        event = a.logger.Log()
+    }
+
+    if len(fields) > 0 {
+        event.Fields(fields)
+    }
+    event.Msg(msg)
+}
+
+func main() {
+    // 1. Initialize zerolog logger
+    // Open log file
+    logFile, _ := os.OpenFile("logfile.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+    defer logFile.Close()
+
+    // 2. Chain create Logger: output to both console and file
+    logger := zerolog.New(zerolog.MultiLevelWriter(
+        zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339},
+        logFile,
+    )).With().Timestamp().Logger()
+
+    // 3. Integrate zerolog into dbkit
+    dbkit.SetLogger(&ZerologAdapter{logger: logger})
+    dbkit.SetDebugMode(true) // Enable debug mode to see SQL
+}
+```
+
+### 12. Connection Pool Configuration
 
 ```go
 config := &dbkit.Config{
