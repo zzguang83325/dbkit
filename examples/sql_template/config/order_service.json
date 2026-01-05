@@ -1,0 +1,98 @@
+{
+  "version": "1.0",
+  "description": "订单服务SQL配置",
+  "namespace": "order_service",
+  "sqls": [
+    {
+      "name": "findById",
+      "description": "根据ID查找订单",
+      "sql": "SELECT * FROM orders WHERE id = :id",
+      "type": "select"
+    },
+    {
+      "name": "findUserOrders",
+      "description": "查找用户订单",
+      "sql": "SELECT o.*, u.name as user_name FROM orders o JOIN users u ON o.user_id = u.id WHERE o.user_id = :userId",
+      "type": "select",
+      "order": "o.created_at DESC",
+      "inparam": [
+        {
+          "name": "status",
+          "type": "string",
+          "desc": "订单状态",
+          "sql": " AND o.status = :status"
+        },
+        {
+          "name": "dateFrom",
+          "type": "string",
+          "desc": "开始日期",
+          "sql": " AND o.created_at >= :dateFrom"
+        },
+        {
+          "name": "dateTo",
+          "type": "string",
+          "desc": "结束日期",
+          "sql": " AND o.created_at <= :dateTo"
+        },
+        {
+          "name": "minAmount",
+          "type": "float64",
+          "desc": "最小金额",
+          "sql": " AND o.total_amount >= :minAmount"
+        }
+      ]
+    },
+    {
+      "name": "countOrders",
+      "description": "统计订单数量",
+      "sql": "SELECT COUNT(*) as total FROM orders WHERE 1=1",
+      "type": "select",
+      "inparam": [
+        {
+          "name": "status",
+          "type": "string",
+          "desc": "订单状态",
+          "sql": " AND status = :status"
+        },
+        {
+          "name": "userId",
+          "type": "int",
+          "desc": "用户ID",
+          "sql": " AND user_id = :userId"
+        }
+      ]
+    },
+    {
+      "name": "insertOrder",
+      "description": "创建新订单",
+      "sql": "INSERT INTO orders (user_id, order_no, total_amount, status, created_at) VALUES (:userId, :orderNo, :totalAmount, :status, NOW())",
+      "type": "insert"
+    },
+    {
+      "name": "updateOrderStatus",
+      "description": "更新订单状态",
+      "sql": "UPDATE orders SET status = :status, updated_at = NOW() WHERE id = :id",
+      "type": "update"
+    },
+    {
+      "name": "getOrderSummary",
+      "description": "获取订单汇总信息",
+      "sql": "SELECT status, COUNT(*) as count, SUM(total_amount) as total_amount FROM orders WHERE 1=1",
+      "type": "select",
+      "inparam": [
+        {
+          "name": "userId",
+          "type": "int",
+          "desc": "用户ID",
+          "sql": " AND user_id = :userId"
+        },
+        {
+          "name": "dateFrom",
+          "type": "string",
+          "desc": "开始日期",
+          "sql": " AND created_at >= :dateFrom"
+        }
+      ]
+    }
+  ]
+}

@@ -378,3 +378,119 @@ dbkit.CreateCache("store_name", 10*time.Second)
 // Initialize logger
 dbkit.InitLoggerWithFile("debug", "log.log")
 ```
+
+## SQL Templates
+
+```go
+// Load configuration files
+err := dbkit.LoadSqlConfig("config/user_service.json")
+err := dbkit.LoadSqlConfigs([]string{"config/user1.json", "config/user2.json"})
+err := dbkit.LoadSqlConfigDir("config/")
+
+// Single simple parameter
+record, err := dbkit.SqlTemplate("user_service.findById", 123).QueryFirst()
+
+// Variadic parameters (recommended)
+records, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query()
+
+// Named parameters (Map)
+params := map[string]interface{}{
+    "name": "John",
+    "status": 1,
+}
+records, err := dbkit.SqlTemplate("user_service.findByParams", params).Query()
+
+// Array parameters
+records, err := dbkit.SqlTemplate("user_service.insertUser", 
+    []interface{}{"John", "john@example.com", 30}).Exec()
+
+// Execute update
+result, err := dbkit.SqlTemplate("user_service.updateUser", 
+    "Jane", "jane@example.com", 25, 123).Exec()
+
+// Use in transaction
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    result, err := tx.SqlTemplate("user_service.insertUser", 
+        "Bob", "bob@example.com", 28).Exec()
+    return err
+})
+
+// Specify database
+records, err := dbkit.Use("mysql").SqlTemplate("findUsers", 123).Query()
+
+// Set timeout
+records, err := dbkit.SqlTemplate("user_service.complexQuery", params).
+    Timeout(30 * time.Second).Query()
+```
+
+### SQL Template Configuration Format
+
+```json
+{
+  "version": "1.0",
+  "description": "User service SQL configuration",
+  "namespace": "user_service",
+  "sqls": [
+    {
+      "name": "findById",
+      "description": "Find user by ID",
+      "sql": "SELECT * FROM users WHERE id = ?",
+      "type": "select"
+    },
+    {
+      "name": "updateUser",
+      "description": "Update user information",
+      "sql": "UPDATE users SET name = :name, email = :email WHERE id = :id",
+      "type": "update"
+    },
+    {
+      "name": "searchUsers",
+      "description": "Dynamic user query",
+      "sql": "SELECT * FROM users WHERE 1=1",
+      "type": "select",
+      "order": "created_at DESC",
+      "inparam": [
+        {
+          "name": "status",
+          "type": "int",
+          "desc": "User status",
+          "sql": " AND status = :status"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "desc": "Name fuzzy search",
+          "sql": " AND name LIKE CONCAT('%', :name, '%')"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### SQL Template Parameter Types
+
+| Parameter Type | Use Case | SQL Placeholder | Example |
+|---------------|----------|-----------------|---------|
+| Single simple type | Single positional parameter | `?` | `123`, `"John"`, `true` |
+| Variadic parameters | Multiple positional parameters | `?` | `SqlTemplate(name, 123, "John")` |
+| Map parameters | Named parameters | `:name` | `map[string]interface{}{"id": 123}` |
+| Array parameters | Multiple positional parameters | `?` | `[]interface{}{123, "John"}` |
+
+### SQL Template Error Handling
+
+```go
+result, err := dbkit.SqlTemplate("user_service.findById", 123).QueryFirst()
+if err != nil {
+    if sqlErr, ok := err.(*dbkit.SqlConfigError); ok {
+        switch sqlErr.Type {
+        case "NotFoundError":
+            fmt.Printf("SQL template not found: %v\n", sqlErr.Message)
+        case "ParameterError":
+            fmt.Printf("Parameter error: %v\n", sqlErr.Message)
+        case "ParameterTypeMismatch":
+            fmt.Printf("Parameter type mismatch: %v\n", sqlErr.Message)
+        }
+    }
+}
+```

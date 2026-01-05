@@ -17,6 +17,7 @@
 - [链式查询](#链式查询)
 - [DbModel 操作](#dbmodel-操作)
 - [缓存操作](#缓存操作)
+- [SQL 模板](#sql-模板)
 - [日志配置](#日志配置)
 - [工具函数](#工具函数)
 
@@ -354,6 +355,7 @@ func (db *DB) UpdateFast(table string, record *Record, whereSql string, whereArg
    // 更新配置表（不需要时间戳）
    record := dbkit.NewRecord().Set("value", "new_value")
    dbkit.UpdateFast("config", record, "key = ?", "app_version")
+   ```
 ```
    
 4. **已启用时间戳、乐观锁等功能但某些操作需要跳过**: 
@@ -365,7 +367,7 @@ func (db *DB) UpdateFast(table string, record *Record, whereSql string, whereArg
    // 但某些高频操作需要跳过
    record := dbkit.NewRecord().Set("view_count", viewCount)
    dbkit.UpdateFast("articles", record, "id = ?", articleId)
-   ```
+```
 
 **性能对比:**
 - 当时间戳 、 软删除、乐观锁等功能关闭时，`Update` 和 `UpdateFast` 性能相同
@@ -1668,6 +1670,495 @@ func LogDebug(msg string, fields map[string]interface{})
 func LogInfo(msg string, fields map[string]interface{})
 func LogWarn(msg string, fields map[string]interface{})
 func LogError(msg string, fields map[string]interface{})
+```
+
+---
+
+## SQL 模板
+
+DBKit 提供了强大的 SQL 模板功能，允许您将 SQL 语句配置化管理，支持动态参数、条件构建和多数据库执行。
+
+### 配置文件结构
+
+SQL 模板使用 JSON 格式的配置文件。以下是一个完整的配置文件格式模板：
+
+#### 完整 JSON 格式模板
+
+```json
+{
+  "version": "1.0",
+  "description": "服务SQL配置文件描述",
+  "namespace": "service_name",
+  "sqls": [
+    {
+      "name": "sqlName",
+      "description": "SQL语句描述",
+      "sql": "SELECT * FROM table WHERE condition = :param",
+      "type": "select",
+      "order": "created_at DESC",
+      "inparam": [
+        {
+          "name": "paramName",
+          "type": "string",
+          "desc": "参数描述",
+          "sql": " AND column = :paramName"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### 字段说明
+
+**根级别字段：**
+- `version` (string, 必需): 配置文件版本号
+- `description` (string, 可选): 配置文件描述
+- `namespace` (string, 可选): 命名空间，用于避免 SQL 名称冲突
+- `sqls` (array, 必需): SQL 语句配置数组
+
+**SQL 配置字段：**
+- `name` (string, 必需): SQL 语句唯一标识符
+- `description` (string, 可选): SQL 语句描述
+- `sql` (string, 必需): SQL 语句模板
+- `type` (string, 可选): SQL 类型 (`select`, `insert`, `update`, `delete`)
+- `order` (string, 可选): 默认排序条件
+- `inparam` (array, 可选): 输入参数定义（用于动态 SQL）
+
+**输入参数字段 (inparam)：**
+- `name` (string, 必需): 参数名称
+- `type` (string, 必需): 参数类型
+- `desc` (string, 可选): 参数描述
+- `sql` (string, 必需): 当参数存在时追加的 SQL 片段
+
+#### 实际配置示例
+
+```json
+{
+  "version": "1.0",
+  "description": "用户服务SQL配置",
+  "namespace": "user_service",
+  "sqls": [
+    {
+      "name": "findById",
+      "description": "根据ID查找用户",
+      "sql": "SELECT * FROM users WHERE id = :id",
+      "type": "select"
+    },
+    {
+      "name": "findUsers",
+      "description": "动态查询用户列表",
+      "sql": "SELECT * FROM users WHERE 1=1",
+      "type": "select",
+      "order": "created_at DESC",
+      "inparam": [
+        {
+          "name": "status",
+          "type": "int",
+          "desc": "用户状态",
+          "sql": " AND status = :status"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "desc": "用户名模糊查询",
+          "sql": " AND name LIKE CONCAT('%', :name, '%')"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### 参数类型支持
+
+DBKit SQL 模板支持多种参数传递方式，提供灵活的使用体验：
+
+#### 支持的参数类型
+
+| 参数类型 | 适用场景 | SQL 占位符 | 示例 |
+|---------|---------|-----------|------|
+| `map[string]interface{}` | 命名参数 | `:name` | `map[string]interface{}{"id": 123}` |
+| `[]interface{}` | 多个位置参数 | `?` | `[]interface{}{123, "John"}` |
+| **单个简单类型** | 单个位置参数 | `?` | `123`, `"John"`, `true` |
+| **可变参数** | 多个位置参数 | `?` | `SqlTemplate(name, 123, "John", true)` |
+
+#### 单个简单类型支持
+
+🆕 支持直接传递简单类型参数，无需包装成 map 或 slice：
+
+- `string` - 字符串
+- `int`, `int8`, `int16`, `int32`, `int64` - 整数类型
+- `uint`, `uint8`, `uint16`, `uint32`, `uint64` - 无符号整数
+- `float32`, `float64` - 浮点数
+- `bool` - 布尔值
+
+#### 可变参数支持
+
+🆕 **新特性**：支持 Go 风格的可变参数 (`...interface{}`)，提供最自然的参数传递方式：
+
+```go
+// 可变参数方式 - 最直观和简洁
+records, err := dbkit.SqlTemplate("findByIdAndStatus", 123, 1).Query()
+records, err := dbkit.SqlTemplate("updateUser", "John", "john@example.com", 25, 123).Exec()
+records, err := dbkit.SqlTemplate("findByAgeRange", 18, 65, 1).Query()
+```
+
+#### 参数匹配规则
+
+| SQL 占位符 | 参数类型 | 结果 |
+|-----------|---------|------|
+| 单个 `?` | 单个简单类型 | ✅ 支持 |
+| 单个 `?` | `map[string]interface{}` | ✅ 支持（向后兼容） |
+| 单个 `?` | `[]interface{}{value}` | ✅ 支持（向后兼容） |
+| 多个 `?` | `[]interface{}{v1, v2, ...}` | ✅ 支持 |
+| 多个 `?` | **可变参数 `v1, v2, ...`** | ✅ 支持 🆕 |
+| 多个 `?` | 单个简单类型 | ❌ 错误提示 |
+| `:name` | `map[string]interface{}{"name": value}` | ✅ 支持 |
+| `:name` | 单个简单类型 | ❌ 错误提示 |
+| `:name` | 可变参数 | ❌ 错误提示 |
+
+#### 参数数量验证
+
+系统会自动验证参数数量与 SQL 占位符数量是否匹配：
+
+```go
+// SQL: "SELECT * FROM users WHERE id = ? AND status = ?"
+// 正确：2个参数匹配2个占位符
+records, err := dbkit.SqlTemplate("findByIdAndStatus", 123, 1).Query()
+
+// 错误：参数不足
+records, err := dbkit.SqlTemplate("findByIdAndStatus", 123).Query()
+// 返回错误: parameter count mismatch: SQL has 2 '?' placeholders but got 1 parameters
+
+// 错误：参数过多  
+records, err := dbkit.SqlTemplate("findByIdAndStatus", 123, 1, 2).Query()
+// 返回错误: parameter count mismatch: SQL has 2 '?' placeholders but got 3 parameters
+```
+
+#### 使用示例
+
+```go
+// 1. 单个简单参数（推荐用于单参数查询）
+records, err := dbkit.SqlTemplate("user_service.findById", 123).Query()
+records, err := dbkit.SqlTemplate("user_service.findByEmail", "user@example.com").Query()
+records, err := dbkit.SqlTemplate("user_service.findActive", true).Query()
+
+// 2. 可变参数（推荐用于多参数查询）
+records, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query()
+records, err := dbkit.SqlTemplate("user_service.updateUser", "John", "john@example.com", 25, 123).Exec()
+records, err := dbkit.SqlTemplate("user_service.findByAgeRange", 18, 65, 1).Query()
+
+// 3. 命名参数（适用于复杂查询）
+params := map[string]interface{}{
+    "status": 1,
+    "name": "John",
+    "ageMin": 18,
+}
+records, err := dbkit.SqlTemplate("user_service.findUsers", params).Query()
+
+// 4. 位置参数（向后兼容）
+records, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 
+    []interface{}{123, 1}).Query()
+```
+
+### 配置加载
+
+#### LoadSqlConfig
+```go
+func LoadSqlConfig(configPath string) error
+```
+加载单个 SQL 配置文件。
+
+**示例:**
+```go
+err := dbkit.LoadSqlConfig("config/user_service.json")
+```
+
+#### LoadSqlConfigs
+```go
+func LoadSqlConfigs(configPaths []string) error
+```
+批量加载多个 SQL 配置文件。
+
+**示例:**
+```go
+configPaths := []string{
+    "config/user_service.json",
+    "config/order_service.json",
+}
+err := dbkit.LoadSqlConfigs(configPaths)
+```
+
+#### LoadSqlConfigDir
+```go
+func LoadSqlConfigDir(dirPath string) error
+```
+加载指定目录下的所有 JSON 配置文件。
+
+**示例:**
+```go
+err := dbkit.LoadSqlConfigDir("config/")
+```
+
+#### ReloadSqlConfig
+```go
+func ReloadSqlConfig(configPath string) error
+```
+重新加载指定的配置文件。
+
+#### ReloadAllSqlConfigs
+```go
+func ReloadAllSqlConfigs() error
+```
+重新加载所有已加载的配置文件。
+
+### 配置信息查询
+
+#### GetSqlConfigInfo
+```go
+func GetSqlConfigInfo() []ConfigInfo
+```
+获取所有已加载配置文件的信息。
+
+**ConfigInfo 结构体:**
+```go
+type ConfigInfo struct {
+    FilePath    string `json:"filePath"`
+    Namespace   string `json:"namespace"`
+    Description string `json:"description"`
+    SqlCount    int    `json:"sqlCount"`
+}
+```
+
+#### ListSqlItems
+```go
+func ListSqlItems() map[string]*SqlItem
+```
+列出所有可用的 SQL 模板项。
+
+### SQL 模板执行
+
+#### SqlTemplate (全局)
+```go
+func SqlTemplate(name string, params ...interface{}) *SqlTemplateBuilder
+```
+创建 SQL 模板构建器，使用默认数据库连接。
+
+**参数:**
+- `name`: SQL 模板名称（支持命名空间，如 "user_service.findById"）
+- `params`: 可变参数，支持以下类型：
+  - `map[string]interface{}` - 命名参数（`:name`）
+  - `[]interface{}` - 位置参数数组（`?`）
+  - **单个简单类型** - 单个位置参数（`?`），支持 `string`、`int`、`float`、`bool` 等基本类型
+  - **🆕 可变参数** - 多个位置参数（`?`），直接传递多个值
+
+**示例:**
+```go
+// 使用命名参数
+records, err := dbkit.SqlTemplate("user_service.findById", 
+    map[string]interface{}{"id": 123}).Query()
+
+// 使用位置参数数组
+records, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 
+    []interface{}{123, 1}).Query()
+
+// 🆕 使用单个简单参数（推荐用于单参数查询）
+records, err := dbkit.SqlTemplate("user_service.findById", 123).Query()
+records, err := dbkit.SqlTemplate("user_service.findByEmail", "user@example.com").Query()
+
+// 🆕 使用可变参数（推荐用于多参数查询）
+records, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query()
+records, err := dbkit.SqlTemplate("user_service.updateUser", "John", "john@example.com", 25, 123).Exec()
+records, err := dbkit.SqlTemplate("user_service.findByAgeRange", 18, 65, 1).Query()
+```
+
+#### SqlTemplate (指定数据库)
+```go
+func (db *DB) SqlTemplate(name string, params ...interface{}) *SqlTemplateBuilder
+```
+在指定数据库上创建 SQL 模板构建器。
+
+**示例:**
+```go
+// 传统方式
+records, err := dbkit.Use("mysql").SqlTemplate("user_service.findById", 
+    map[string]interface{}{"id": 123}).Query()
+
+// 🆕 单个简单参数（更简洁）
+records, err := dbkit.Use("mysql").SqlTemplate("user_service.findById", 123).Query()
+
+// 🆕 可变参数（最简洁）
+records, err := dbkit.Use("mysql").SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query()
+```
+
+#### SqlTemplate (事务)
+```go
+func (tx *Tx) SqlTemplate(name string, params ...interface{}) *SqlTemplateBuilder
+```
+在事务中使用 SQL 模板。
+
+**示例:**
+```go
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    // 使用可变参数
+    result, err := tx.SqlTemplate("user_service.insertUser", "John", "john@example.com", 25).Exec()
+    return err
+})
+```
+
+### SqlTemplateBuilder 方法
+
+#### Timeout
+```go
+func (b *SqlTemplateBuilder) Timeout(timeout time.Duration) *SqlTemplateBuilder
+```
+设置查询超时时间。
+
+**示例:**
+```go
+records, err := dbkit.SqlTemplate("user_service.findUsers", params).
+    Timeout(30 * time.Second).Query()
+```
+
+#### Query
+```go
+func (b *SqlTemplateBuilder) Query() ([]Record, error)
+```
+执行查询并返回多条记录。
+
+#### QueryFirst
+```go
+func (b *SqlTemplateBuilder) QueryFirst() (*Record, error)
+```
+执行查询并返回第一条记录。
+
+#### Exec
+```go
+func (b *SqlTemplateBuilder) Exec() (sql.Result, error)
+```
+执行 SQL 语句（INSERT、UPDATE、DELETE）。
+
+### 动态 SQL 构建
+
+通过 `inparam` 配置可以实现动态 SQL 条件构建：
+
+```json
+{
+  "name": "searchUsers",
+  "sql": "SELECT * FROM users WHERE 1=1",
+  "inparam": [
+    {
+      "name": "status",
+      "type": "int",
+      "desc": "用户状态",
+      "sql": " AND status = :status"
+    },
+    {
+      "name": "ageMin",
+      "type": "int", 
+      "desc": "最小年龄",
+      "sql": " AND age >= :ageMin"
+    }
+  ],
+  "order": "created_at DESC"
+}
+```
+
+**使用示例:**
+```go
+// 只传入部分参数，系统会自动构建相应的 SQL
+params := map[string]interface{}{
+    "status": 1,
+    // ageMin 未提供，对应的条件不会被添加
+}
+records, err := dbkit.SqlTemplate("searchUsers", params).Query()
+// 生成的 SQL: SELECT * FROM users WHERE 1=1 AND status = ? ORDER BY created_at DESC
+```
+
+### 参数处理
+
+#### 命名参数
+使用 `:paramName` 格式的命名参数：
+
+```go
+params := map[string]interface{}{
+    "id": 123,
+    "name": "张三",
+}
+records, err := dbkit.SqlTemplate("user_service.updateUser", params).Exec()
+```
+
+#### 位置参数
+使用 `?` 占位符的位置参数：
+
+```go
+params := []interface{}{123}
+records, err := dbkit.SqlTemplate("user_service.findById", params).Query()
+```
+
+### 错误处理
+
+SQL 模板系统提供详细的错误信息：
+
+```go
+type SqlConfigError struct {
+    Type    string // 错误类型：NotFoundError, ParameterError, ParseError 等
+    Message string // 错误描述
+    SqlName string // 相关的 SQL 名称
+    Cause   error  // 原始错误
+}
+```
+
+**常见错误类型:**
+- `NotFoundError`: SQL 模板不存在
+- `ParameterError`: 参数错误（缺失、类型不匹配等）
+- `ParameterTypeMismatch`: 参数类型与 SQL 格式不匹配
+- `ParseError`: 配置文件解析错误
+- `DuplicateError`: 重复的 SQL 标识符
+
+### 最佳实践
+
+1. **命名规范**: 使用命名空间避免 SQL 名称冲突
+2. **参数验证**: 系统会自动验证必需参数
+3. **动态条件**: 使用 `inparam` 实现灵活的条件构建
+4. **错误处理**: 捕获并处理 `SqlConfigError` 类型的错误
+5. **性能优化**: 配置文件在首次加载后会被缓存
+
+**完整示例:**
+```go
+// 1. 加载配置
+err := dbkit.LoadSqlConfigDir("config/")
+if err != nil {
+    log.Fatal(err)
+}
+
+// 2. 执行查询
+params := map[string]interface{}{
+    "status": 1,
+    "name": "张",
+}
+
+records, err := dbkit.Use("mysql").
+    SqlTemplate("user_service.findUsers", params).
+    Timeout(30 * time.Second).
+    Query()
+
+if err != nil {
+    if sqlErr, ok := err.(*dbkit.SqlConfigError); ok {
+        log.Printf("SQL 配置错误 [%s]: %s", sqlErr.Type, sqlErr.Message)
+    } else {
+        log.Printf("执行错误: %v", err)
+    }
+    return
+}
+
+// 3. 处理结果
+for _, record := range records {
+    fmt.Printf("用户: %s, 状态: %d\n", 
+        record.GetString("name"), 
+        record.GetInt("status"))
+}
 ```
 
 ---

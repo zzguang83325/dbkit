@@ -1,8 +1,8 @@
 # DBKit - Go Database Library
 
-[English](README_EN.md) | [API 手册](api.md) | [API Reference](api_en.md)
+[English](README_EN.md) | [API 手册](api.md) | [API Reference](api_en.md) | [SQL 模板指南](doc/cn/SQL_TEMPLATE_GUIDE.md) | [SQL Template Guide](doc/en/SQL_TEMPLATE_GUIDE_EN.md)
 
-DBKit 是一个基于 Go 语言的高性能、轻量级数据库操作工具包，灵感来自 Java 中 JFinal 框架的 ActiveRecord 模式。它提供了极其简洁、直观的 API，通过 `Record` 和DbModel，让数据库操作变得像操作对象一样简单。 
+DBKit 是一个基于 Go 语言的高性能、轻量级数据库ORM，灵感来自 Java 语言中的 JFinal 框架。它提供了极其简洁、直观的 API，通过 `Record` 和DbModel，让数据库操作变得像操作对象一样简单。 
 
 **项目链接**：https://github.com/zzguang83325/dbkit.git 
 
@@ -24,6 +24,7 @@ DBKit 是一个基于 Go 语言的高性能、轻量级数据库操作工具包�
 - **自动时间戳**: 支持配置自动时间戳字段，插入和更新时自动填充 created_at 和 updated_at
 - **软删除支持**: 支持配置软删除字段，自动过滤已删除记录，提供恢复和物理删除功能
 - **乐观锁支持**: 支持配置版本字段，自动检测并发冲突，防止数据覆盖
+- **SQL 模板**: 支持 SQL 配置化管理，动态参数构建，支持可变参数 - [详细指南](doc/cn/SQL_TEMPLATE_GUIDE.md)
 
 ## 性能对比
 
@@ -287,6 +288,7 @@ DBKit 提供了针对各种数据库的详细示例，您可以在 `examples/` �
 - `examples/sqlserver/` - SQL Server 数据库使用示例
 - `examples/cache_redis/` - Redis缓存使用示例
 - `examples/log/` - Sql日志使用示例
+- `examples/sql_template/` - Sql模板使用示例
 - `examples/soft_delete/` - 软删除使用示例
 - `examples/timestamp/` - 自动时间戳使用示例
 - `examples/optimistic_lock/` - 乐观锁使用示例
@@ -1310,6 +1312,175 @@ dbkit.Transaction(func(tx *dbkit.Tx) error {
     return err  // 版本冲突时自动回滚
 })
 ```
+
+### 13. SQL 模板 (SQL Templates)
+
+DBKit 提供了强大的 SQL 模板功能，允许您将 SQL 语句配置化管理，支持动态参数、条件构建和多数据库执行。
+
+📖 **[查看完整 SQL 模板使用指南](doc/cn/SQL_TEMPLATE_GUIDE.md)** - 包含详细的配置格式、参数类型、动态SQL构建、最佳实践等内容。
+
+#### 配置文件结构
+
+SQL 模板使用 JSON 格式的配置文件：
+
+```json
+{
+  "version": "1.0",
+  "description": "用户服务SQL配置",
+  "namespace": "user_service",
+  "sqls": [
+    {
+      "name": "findById",
+      "description": "根据ID查找用户",
+      "sql": "SELECT * FROM users WHERE id = ?",
+      "type": "select"
+    },
+    {
+      "name": "findByIdAndStatus",
+      "description": "根据ID和状态查找用户",
+      "sql": "SELECT * FROM users WHERE id = ? AND status = ?",
+      "type": "select"
+    },
+    {
+      "name": "updateUser",
+      "description": "更新用户信息",
+      "sql": "UPDATE users SET name = ?, email = ?, age = ? WHERE id = ?",
+      "type": "update"
+    }
+  ]
+}
+```
+
+#### 参数类型支持
+
+DBKit SQL 模板支持多种参数传递方式：
+
+| 参数类型 | 适用场景 | SQL 占位符 | 示例 |
+|---------|---------|-----------|------|
+| `map[string]interface{}` | 命名参数 | `:name` | `map[string]interface{}{"id": 123}` |
+| `[]interface{}` | 多个位置参数 | `?` | `[]interface{}{123, "John"}` |
+| 单个简单类型 | 单个位置参数 | `?` | `123`, `"John"`, `true` |
+| **🆕 可变参数** | **多个位置参数** | `?` | `SqlTemplate(name, 123, "John", true)` |
+
+#### 配置加载
+
+```go
+// 加载单个配置文件
+err := dbkit.LoadSqlConfig("config/user_service.json")
+
+// 加载多个配置文件
+configPaths := []string{
+    "config/user_service.json",
+    "config/order_service.json",
+}
+err := dbkit.LoadSqlConfigs(configPaths)
+
+// 加载目录下所有 JSON 配置文件
+err := dbkit.LoadSqlConfigDir("config/")
+```
+
+#### SQL 模板执行
+
+```go
+// 1. 单个简单参数
+user, err := dbkit.SqlTemplate("user_service.findById", 123).QueryFirst()
+
+// 2. 可变参数（推荐用于多参数查询）
+users, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query()
+
+// 3. 更新操作
+result, err := dbkit.SqlTemplate("user_service.updateUser", 
+    "John Doe", "john@example.com", 30, 123).Exec()
+
+// 4. 命名参数（适用于复杂查询）
+params := map[string]interface{}{
+    "name": "John",
+    "status": 1,
+}
+users, err := dbkit.SqlTemplate("user_service.findByNamedParams", params).Query()
+
+// 5. 位置参数数组（向后兼容）
+users, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 
+    []interface{}{123, 1}).Query()
+```
+
+#### 多数据库和事务支持
+
+```go
+// 指定数据库执行
+users, err := dbkit.Use("mysql").SqlTemplate("findUsers", 123, 1).Query()
+
+// 事务中使用
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    result, err := tx.SqlTemplate("insertUser", "John", "john@example.com", 25).Exec()
+    return err
+})
+
+// 设置超时
+users, err := dbkit.SqlTemplate("findUsers", 123).
+    Timeout(30 * time.Second).Query()
+```
+
+#### 参数数量验证
+
+系统会自动验证参数数量与 SQL 占位符数量是否匹配：
+
+```go
+// ✅ 正确：2个参数匹配2个占位符
+users, err := dbkit.SqlTemplate("findByIdAndStatus", 123, 1).Query()
+
+// ❌ 错误：参数不足
+users, err := dbkit.SqlTemplate("findByIdAndStatus", 123).Query()
+// 返回: parameter count mismatch: SQL has 2 '?' placeholders but got 1 parameters
+
+// ❌ 错误：参数过多
+users, err := dbkit.SqlTemplate("findByIdAndStatus", 123, 1, 2).Query()
+// 返回: parameter count mismatch: SQL has 2 '?' placeholders but got 3 parameters
+```
+
+#### 动态 SQL 构建
+
+通过 `inparam` 配置可以实现动态 SQL 条件构建：
+
+```json
+{
+  "name": "searchUsers",
+  "sql": "SELECT * FROM users WHERE 1=1",
+  "inparam": [
+    {
+      "name": "status",
+      "type": "int",
+      "desc": "用户状态",
+      "sql": " AND status = ?"
+    },
+    {
+      "name": "ageMin",
+      "type": "int", 
+      "desc": "最小年龄",
+      "sql": " AND age >= ?"
+    }
+  ],
+  "order": "created_at DESC"
+}
+```
+
+```go
+// 只传入部分参数，系统会自动构建相应的 SQL
+params := map[string]interface{}{
+    "status": 1,
+    // ageMin 未提供，对应的条件不会被添加
+}
+users, err := dbkit.SqlTemplate("searchUsers", params).Query()
+// 生成的 SQL: SELECT * FROM users WHERE 1=1 AND status = ? ORDER BY created_at DESC
+```
+
+#### 最佳实践
+
+1. **单参数查询** - 使用 `?` 占位符和简单参数
+2. **多参数查询** - 使用可变参数或命名参数
+3. **复杂查询** - 使用命名参数和动态 SQL
+4. **参数验证** - 系统自动验证参数数量和类型
+5. **错误处理** - 捕获并处理 `SqlConfigError` 类型的错误
 
 ### 缓存支持 (Caching)
 

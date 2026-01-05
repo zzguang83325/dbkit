@@ -1,8 +1,8 @@
 # DBKit - Go Database Library
 
-[中文文档](README.md) | [API Reference](api_en.md) | [中文 API 手册](api.md)
+[中文文档](README.md) | [API Reference](api_en.md) | [中文 API 手册](api.md) | [SQL Template Guide](doc/en/SQL_TEMPLATE_GUIDE_EN.md) | [SQL 模板指南](doc/cn/SQL_TEMPLATE_GUIDE.md)
 
-DBKit is a high-performance, lightweight database operation library for Go, inspired by the ActiveRecord pattern from Java's JFinal framework. It provides an extremely simple and intuitive API that makes database operations as easy as working with objects through `Record` and DbModel.
+DBKit is a high-performance, lightweight database ORM library for Go, inspired  from Java's JFinal framework. It provides an extremely simple and intuitive API that makes database operations as easy as working with objects through `Record` and DbModel.
 
 **Project Link**: https://github.com/zzguang83325/dbkit.git
 
@@ -24,6 +24,7 @@ DBKit is a high-performance, lightweight database operation library for Go, insp
 - **Auto Timestamps**: Configurable auto timestamp fields, automatically populate created_at and updated_at on insert and update
 - **Soft Delete Support**: Configurable soft delete fields, automatic filtering of deleted records, restore and force delete functions
 - **Optimistic Lock Support**: Configurable version fields, automatic concurrent conflict detection, prevents data overwriting
+- **SQL Templates**: SQL configuration management, dynamic parameter building, 🆕 variadic parameter support - [Detailed Guide](doc/en/SQL_TEMPLATE_GUIDE_EN.md)
 
 ## Performance Benchmark
 
@@ -872,7 +873,174 @@ func main() {
 }
 ```
 
-### 12. Connection Pool Configuration
+### 12. SQL Templates
+
+DBKit provides powerful SQL template functionality that allows you to manage SQL statements through configuration, supporting dynamic parameters, conditional building, and multi-database execution.
+
+#### Configuration File Structure
+
+SQL templates use JSON format configuration files:
+
+```json
+{
+  "version": "1.0",
+  "description": "User Service SQL Configuration",
+  "namespace": "user_service",
+  "sqls": [
+    {
+      "name": "findById",
+      "description": "Find user by ID",
+      "sql": "SELECT * FROM users WHERE id = ?",
+      "type": "select"
+    },
+    {
+      "name": "findByIdAndStatus",
+      "description": "Find user by ID and status",
+      "sql": "SELECT * FROM users WHERE id = ? AND status = ?",
+      "type": "select"
+    },
+    {
+      "name": "updateUser",
+      "description": "Update user information",
+      "sql": "UPDATE users SET name = ?, email = ?, age = ? WHERE id = ?",
+      "type": "update"
+    }
+  ]
+}
+```
+
+#### Parameter Type Support
+
+DBKit SQL templates support multiple parameter passing methods:
+
+| Parameter Type | Use Case | SQL Placeholder | Example |
+|---------------|----------|-----------------|---------|
+| `map[string]interface{}` | Named parameters | `:name` | `map[string]interface{}{"id": 123}` |
+| `[]interface{}` | Multiple positional parameters | `?` | `[]interface{}{123, "John"}` |
+| Single simple types | Single positional parameter | `?` | `123`, `"John"`, `true` |
+| **🆕 Variadic parameters** | **Multiple positional parameters** | `?` | `SqlTemplate(name, 123, "John", true)` |
+
+#### Configuration Loading
+
+```go
+// Load single configuration file
+err := dbkit.LoadSqlConfig("config/user_service.json")
+
+// Load multiple configuration files
+configPaths := []string{
+    "config/user_service.json",
+    "config/order_service.json",
+}
+err := dbkit.LoadSqlConfigs(configPaths)
+
+// Load all JSON configuration files from directory
+err := dbkit.LoadSqlConfigDir("config/")
+```
+
+#### SQL Template Execution
+
+```go
+// 1. Single simple parameter
+user, err := dbkit.SqlTemplate("user_service.findById", 123).QueryFirst()
+
+// 2. 🆕 Variadic parameters (recommended for multi-parameter queries)
+users, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query()
+
+// 3. Update operations
+result, err := dbkit.SqlTemplate("user_service.updateUser", 
+    "John Doe", "john@example.com", 30, 123).Exec()
+
+// 4. Named parameters (suitable for complex queries)
+params := map[string]interface{}{
+    "name": "John",
+    "status": 1,
+}
+users, err := dbkit.SqlTemplate("user_service.findByNamedParams", params).Query()
+
+// 5. Positional parameter array (backward compatible)
+users, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 
+    []interface{}{123, 1}).Query()
+```
+
+#### Multi-Database and Transaction Support
+
+```go
+// Execute on specific database
+users, err := dbkit.Use("mysql").SqlTemplate("findUsers", 123, 1).Query()
+
+// Use in transactions
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    result, err := tx.SqlTemplate("insertUser", "John", "john@example.com", 25).Exec()
+    return err
+})
+
+// Set timeout
+users, err := dbkit.SqlTemplate("findUsers", 123).
+    Timeout(30 * time.Second).Query()
+```
+
+#### Parameter Count Validation
+
+The system automatically validates that parameter count matches SQL placeholder count:
+
+```go
+// ✅ Correct: 2 parameters match 2 placeholders
+users, err := dbkit.SqlTemplate("findByIdAndStatus", 123, 1).Query()
+
+// ❌ Error: insufficient parameters
+users, err := dbkit.SqlTemplate("findByIdAndStatus", 123).Query()
+// Returns: parameter count mismatch: SQL has 2 '?' placeholders but got 1 parameters
+
+// ❌ Error: too many parameters
+users, err := dbkit.SqlTemplate("findByIdAndStatus", 123, 1, 2).Query()
+// Returns: parameter count mismatch: SQL has 2 '?' placeholders but got 3 parameters
+```
+
+#### Dynamic SQL Building
+
+Through `inparam` configuration, you can implement dynamic SQL condition building:
+
+```json
+{
+  "name": "searchUsers",
+  "sql": "SELECT * FROM users WHERE 1=1",
+  "inparam": [
+    {
+      "name": "status",
+      "type": "int",
+      "desc": "User status",
+      "sql": " AND status = ?"
+    },
+    {
+      "name": "ageMin",
+      "type": "int", 
+      "desc": "Minimum age",
+      "sql": " AND age >= ?"
+    }
+  ],
+  "order": "created_at DESC"
+}
+```
+
+```go
+// Only pass partial parameters, system will automatically build corresponding SQL
+params := map[string]interface{}{
+    "status": 1,
+    // ageMin not provided, corresponding condition won't be added
+}
+users, err := dbkit.SqlTemplate("searchUsers", params).Query()
+// Generated SQL: SELECT * FROM users WHERE 1=1 AND status = ? ORDER BY created_at DESC
+```
+
+#### Best Practices
+
+1. **Single parameter queries** - Use `?` placeholders with simple parameters
+2. **Multi-parameter queries** - Use variadic parameters or named parameters
+3. **Complex queries** - Use named parameters and dynamic SQL
+4. **Parameter validation** - System automatically validates parameter count and type
+5. **Error handling** - Catch and handle `SqlConfigError` type errors
+
+### 13. Connection Pool Configuration
 
 ```go
 config := &dbkit.Config{

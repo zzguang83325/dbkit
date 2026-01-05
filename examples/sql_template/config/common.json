@@ -1,0 +1,24 @@
+{
+  "version": "1.0",
+  "description": "通用SQL配置",
+  "sqls": [
+    {
+      "name": "getSystemInfo",
+      "description": "获取系统信息",
+      "sql": "SELECT VERSION() as db_version, NOW() as current_time, DATABASE() as current_db",
+      "type": "select"
+    },
+    {
+      "name": "checkTableExists",
+      "description": "检查表是否存在",
+      "sql": "SELECT COUNT(*) as count FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :tableName",
+      "type": "select"
+    },
+    {
+      "name": "getTableInfo",
+      "description": "获取表信息",
+      "sql": "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = :tableName ORDER BY ordinal_position",
+      "type": "select"
+    }
+  ]
+}

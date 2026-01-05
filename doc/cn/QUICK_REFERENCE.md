@@ -380,3 +380,119 @@ dbkit.CreateCache("store_name", 10*time.Second)
 // 初始化日志
 dbkit.InitLoggerWithFile("debug", "log.log")
 ```
+
+## SQL 模板
+
+```go
+// 加载配置文件
+err := dbkit.LoadSqlConfig("config/user_service.json")
+err := dbkit.LoadSqlConfigs([]string{"config/user1.json", "config/user2.json"})
+err := dbkit.LoadSqlConfigDir("config/")
+
+// 单个简单参数
+record, err := dbkit.SqlTemplate("user_service.findById", 123).QueryFirst()
+
+// 可变参数（推荐）
+records, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query()
+
+// 命名参数（Map）
+params := map[string]interface{}{
+    "name": "张三",
+    "status": 1,
+}
+records, err := dbkit.SqlTemplate("user_service.findByParams", params).Query()
+
+// 数组参数
+records, err := dbkit.SqlTemplate("user_service.insertUser", 
+    []interface{}{"张三", "zhangsan@example.com", 30}).Exec()
+
+// 执行更新
+result, err := dbkit.SqlTemplate("user_service.updateUser", 
+    "李四", "lisi@example.com", 25, 123).Exec()
+
+// 在事务中使用
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    result, err := tx.SqlTemplate("user_service.insertUser", 
+        "王五", "wangwu@example.com", 28).Exec()
+    return err
+})
+
+// 指定数据库
+records, err := dbkit.Use("mysql").SqlTemplate("findUsers", 123).Query()
+
+// 设置超时
+records, err := dbkit.SqlTemplate("user_service.complexQuery", params).
+    Timeout(30 * time.Second).Query()
+```
+
+### SQL 模板配置文件格式
+
+```json
+{
+  "version": "1.0",
+  "description": "用户服务SQL配置",
+  "namespace": "user_service",
+  "sqls": [
+    {
+      "name": "findById",
+      "description": "根据ID查找用户",
+      "sql": "SELECT * FROM users WHERE id = ?",
+      "type": "select"
+    },
+    {
+      "name": "updateUser",
+      "description": "更新用户信息",
+      "sql": "UPDATE users SET name = :name, email = :email WHERE id = :id",
+      "type": "update"
+    },
+    {
+      "name": "searchUsers",
+      "description": "动态查询用户",
+      "sql": "SELECT * FROM users WHERE 1=1",
+      "type": "select",
+      "order": "created_at DESC",
+      "inparam": [
+        {
+          "name": "status",
+          "type": "int",
+          "desc": "用户状态",
+          "sql": " AND status = :status"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "desc": "用户名模糊查询",
+          "sql": " AND name LIKE CONCAT('%', :name, '%')"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### SQL 模板参数类型
+
+| 参数类型 | 适用场景 | SQL 占位符 | 示例 |
+|---------|---------|-----------|------|
+| 单个简单类型 | 单个位置参数 | `?` | `123`, `"John"`, `true` |
+| 可变参数 | 多个位置参数 | `?` | `SqlTemplate(name, 123, "John")` |
+| Map 参数 | 命名参数 | `:name` | `map[string]interface{}{"id": 123}` |
+| 数组参数 | 多个位置参数 | `?` | `[]interface{}{123, "John"}` |
+
+### SQL 模板错误处理
+
+```go
+result, err := dbkit.SqlTemplate("user_service.findById", 123).QueryFirst()
+if err != nil {
+    if sqlErr, ok := err.(*dbkit.SqlConfigError); ok {
+        switch sqlErr.Type {
+        case "NotFoundError":
+            fmt.Printf("SQL模板不存在: %v\n", sqlErr.Message)
+        case "ParameterError":
+            fmt.Printf("参数错误: %v\n", sqlErr.Message)
+        case "ParameterTypeMismatch":
+            fmt.Printf("参数类型不匹配: %v\n", sqlErr.Message)
+        }
+    }
+}
+```

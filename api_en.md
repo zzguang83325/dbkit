@@ -17,6 +17,7 @@
 - [Chained Query](#chained-query)
 - [DbModel Operations](#dbmodel-operations)
 - [Cache Operations](#cache-operations)
+- [SQL Templates](#sql-templates)
 - [Log Configuration](#log-configuration)
 - [Utility Functions](#utility-functions)
 
@@ -1668,6 +1669,539 @@ func LogDebug(msg string, fields map[string]interface{})
 func LogInfo(msg string, fields map[string]interface{})
 func LogWarn(msg string, fields map[string]interface{})
 func LogError(msg string, fields map[string]interface{})
+```
+
+---
+
+## SQL Templates
+
+DBKit provides powerful SQL template functionality that allows you to manage SQL statements through configuration, supporting dynamic parameters, conditional building, and multi-database execution.
+
+### Configuration File Structure
+
+SQL templates use JSON format configuration files. Here's a complete configuration file format template:
+
+#### Complete JSON Format Template
+
+```json
+{
+  "version": "1.0",
+  "description": "Service SQL configuration file description",
+  "namespace": "service_name",
+  "sqls": [
+    {
+      "name": "sqlName",
+      "description": "SQL statement description",
+      "sql": "SELECT * FROM table WHERE condition = :param",
+      "type": "select",
+      "order": "created_at DESC",
+      "inparam": [
+        {
+          "name": "paramName",
+          "type": "string",
+          "desc": "Parameter description",
+          "sql": " AND column = :paramName"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### Field Descriptions
+
+**Root Level Fields:**
+- `version` (string, required): Configuration file version number
+- `description` (string, optional): Configuration file description
+- `namespace` (string, optional): Namespace to avoid SQL name conflicts
+- `sqls` (array, required): Array of SQL statement configurations
+
+**SQL Configuration Fields:**
+- `name` (string, required): Unique identifier for the SQL statement
+- `description` (string, optional): SQL statement description
+- `sql` (string, required): SQL statement template
+- `type` (string, optional): SQL type (`select`, `insert`, `update`, `delete`)
+- `order` (string, optional): Default sorting condition
+- `inparam` (array, optional): Input parameter definitions (for dynamic SQL)
+
+**Input Parameter Fields (inparam):**
+- `name` (string, required): Parameter name
+- `type` (string, required): Parameter type
+- `desc` (string, optional): Parameter description
+- `sql` (string, required): SQL fragment to append when parameter exists
+
+#### Practical Configuration Example
+
+```json
+{
+  "version": "1.0",
+  "description": "User service SQL configuration",
+  "namespace": "user_service",
+  "sqls": [
+    {
+      "name": "findById",
+      "description": "Find user by ID",
+      "sql": "SELECT * FROM users WHERE id = :id",
+      "type": "select"
+    },
+    {
+      "name": "findUsers",
+      "description": "Dynamic user query",
+      "sql": "SELECT * FROM users WHERE 1=1",
+      "type": "select",
+      "order": "created_at DESC",
+      "inparam": [
+        {
+          "name": "status",
+          "type": "int",
+          "desc": "User status",
+          "sql": " AND status = :status"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "desc": "Name fuzzy search",
+          "sql": " AND name LIKE CONCAT('%', :name, '%')"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Parameter Type Support
+
+DBKit SQL templates support multiple parameter passing methods, providing flexible usage experience:
+
+#### Supported Parameter Types
+
+| Parameter Type | Use Case | SQL Placeholder | Example |
+|---------------|----------|-----------------|---------|
+| `map[string]interface{}` | Named parameters | `:name` | `map[string]interface{}{"id": 123}` |
+| `[]interface{}` | Multiple positional parameters | `?` | `[]interface{}{123, "John"}` |
+| **Single simple types** | Single positional parameter | `?` | `123`, `"John"`, `true` |
+| **Variadic parameters** | Multiple positional parameters | `?` | `SqlTemplate(name, 123, "John", true)` |
+
+#### Single Simple Type Support
+
+🆕 **New Feature**: Support for directly passing single simple type parameters without wrapping in map or slice:
+
+- `string` - String values
+- `int`, `int8`, `int16`, `int32`, `int64` - Integer types
+- `uint`, `uint8`, `uint16`, `uint32`, `uint64` - Unsigned integers
+- `float32`, `float64` - Floating point numbers
+- `bool` - Boolean values
+
+#### Variadic Parameter Support
+
+🆕 **New Feature**: Support for Go-style variadic parameters (`...interface{}`), providing the most natural parameter passing method:
+
+```go
+// Variadic parameter approach - most intuitive and concise
+records, err := dbkit.SqlTemplate("findByIdAndStatus", 123, 1).Query()
+records, err := dbkit.SqlTemplate("updateUser", "John", "john@example.com", 25, 123).Exec()
+records, err := dbkit.SqlTemplate("findByAgeRange", 18, 65, 1).Query()
+```
+
+#### Parameter Matching Rules
+
+| SQL Placeholder | Parameter Type | Result |
+|----------------|---------------|--------|
+| Single `?` | Single simple type | ✅ Supported |
+| Single `?` | `map[string]interface{}` | ✅ Supported (backward compatible) |
+| Single `?` | `[]interface{}{value}` | ✅ Supported (backward compatible) |
+| Multiple `?` | `[]interface{}{v1, v2, ...}` | ✅ Supported |
+| Multiple `?` | **Variadic parameters `v1, v2, ...`** | ✅ Supported 🆕 |
+| Multiple `?` | Single simple type | ❌ Error message |
+| `:name` | `map[string]interface{}{"name": value}` | ✅ Supported |
+| `:name` | Single simple type | ❌ Error message |
+| `:name` | Variadic parameters | ❌ Error message |
+
+#### Parameter Count Validation
+
+🆕 **Enhanced Feature**: The system automatically validates that parameter count matches SQL placeholder count:
+
+```go
+// SQL: "SELECT * FROM users WHERE id = ? AND status = ?"
+// Correct: 2 parameters match 2 placeholders
+records, err := dbkit.SqlTemplate("findByIdAndStatus", 123, 1).Query()
+
+// Error: insufficient parameters
+records, err := dbkit.SqlTemplate("findByIdAndStatus", 123).Query()
+// Returns error: parameter count mismatch: SQL has 2 '?' placeholders but got 1 parameters
+
+// Error: too many parameters
+records, err := dbkit.SqlTemplate("findByIdAndStatus", 123, 1, 2).Query()
+// Returns error: parameter count mismatch: SQL has 2 '?' placeholders but got 3 parameters
+```
+| Multiple `?` | Single simple type | ❌ Error message |
+| `:name` | `map[string]interface{}{"name": value}` | ✅ Supported |
+| `:name` | Single simple type | ❌ Error message |
+
+#### Usage Examples
+
+```go
+// 1. Single simple parameter (recommended for single-parameter queries)
+records, err := dbkit.SqlTemplate("user_service.findById", 123).Query()
+records, err := dbkit.SqlTemplate("user_service.findByEmail", "user@example.com").Query()
+records, err := dbkit.SqlTemplate("user_service.findActive", true).Query()
+
+// 2. Named parameters (suitable for complex queries)
+params := map[string]interface{}{
+    "status": 1,
+    "name": "John",
+    "ageMin": 18,
+}
+records, err := dbkit.SqlTemplate("user_service.findUsers", params).Query()
+
+// 3. Positional parameters (suitable for multi-parameter queries)
+records, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 
+    []interface{}{123, 1}).Query()
+```
+
+### Configuration Loading
+
+#### LoadSqlConfig
+```go
+func LoadSqlConfig(configPath string) error
+```
+Load a single SQL configuration file.
+
+**Example:**
+```go
+err := dbkit.LoadSqlConfig("config/user_service.json")
+```
+
+#### LoadSqlConfigs
+```go
+func LoadSqlConfigs(configPaths []string) error
+```
+Load multiple SQL configuration files in batch.
+
+**Example:**
+```go
+configPaths := []string{
+    "config/user_service.json",
+    "config/order_service.json",
+}
+err := dbkit.LoadSqlConfigs(configPaths)
+```
+
+#### LoadSqlConfigDir
+```go
+func LoadSqlConfigDir(dirPath string) error
+```
+Load all JSON configuration files in the specified directory.
+
+**Example:**
+```go
+err := dbkit.LoadSqlConfigDir("config/")
+```
+
+#### ReloadSqlConfig
+```go
+func ReloadSqlConfig(configPath string) error
+```
+Reload the specified configuration file.
+
+#### ReloadAllSqlConfigs
+```go
+func ReloadAllSqlConfigs() error
+```
+Reload all loaded configuration files.
+
+### Configuration Information Query
+
+#### GetSqlConfigInfo
+```go
+func GetSqlConfigInfo() []ConfigInfo
+```
+Get information about all loaded configuration files.
+
+**ConfigInfo Structure:**
+```go
+type ConfigInfo struct {
+    FilePath    string `json:"filePath"`
+    Namespace   string `json:"namespace"`
+    Description string `json:"description"`
+    SqlCount    int    `json:"sqlCount"`
+}
+```
+
+#### ListSqlItems
+```go
+func ListSqlItems() map[string]*SqlItem
+```
+List all available SQL template items.
+
+### SQL Template Execution
+
+#### SqlTemplate (Global)
+```go
+func SqlTemplate(name string, params ...interface{}) *SqlTemplateBuilder
+```
+Create SQL template builder using the default database connection.
+
+**Parameters:**
+- `name`: SQL template name (supports namespace, e.g., "user_service.findById")
+- `params`: Variadic parameters, supports the following types:
+  - `map[string]interface{}` - Named parameters (`:name`)
+  - `[]interface{}` - Positional parameter array (`?`)
+  - **Single simple types** - Single positional parameter (`?`), supports `string`, `int`, `float`, `bool`, etc.
+  - **🆕 Variadic parameters** - Multiple positional parameters (`?`), directly pass multiple values
+
+**Examples:**
+```go
+// Using named parameters
+records, err := dbkit.SqlTemplate("user_service.findById", 
+    map[string]interface{}{"id": 123}).Query()
+
+// Using positional parameter array
+records, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 
+    []interface{}{123, 1}).Query()
+
+// 🆕 Using single simple parameter (recommended for single parameter queries)
+records, err := dbkit.SqlTemplate("user_service.findById", 123).Query()
+records, err := dbkit.SqlTemplate("user_service.findByEmail", "user@example.com").Query()
+
+// 🆕 Using variadic parameters (recommended for multi-parameter queries)
+records, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query()
+records, err := dbkit.SqlTemplate("user_service.updateUser", "John", "john@example.com", 25, 123).Exec()
+records, err := dbkit.SqlTemplate("user_service.findByAgeRange", 18, 65, 1).Query()
+```
+
+#### SqlTemplate (Database Specific)
+```go
+func (db *DB) SqlTemplate(name string, params ...interface{}) *SqlTemplateBuilder
+```
+Create SQL template builder on a specific database.
+
+**Examples:**
+```go
+// Traditional approach
+records, err := dbkit.Use("mysql").SqlTemplate("user_service.findById", 
+    map[string]interface{}{"id": 123}).Query()
+
+// 🆕 Single simple parameter (more concise)
+records, err := dbkit.Use("mysql").SqlTemplate("user_service.findById", 123).Query()
+
+// 🆕 Variadic parameters (most concise)
+records, err := dbkit.Use("mysql").SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query()
+```
+
+#### SqlTemplate (Transaction)
+```go
+func (tx *Tx) SqlTemplate(name string, params ...interface{}) *SqlTemplateBuilder
+```
+Use SQL templates within transactions.
+
+**Examples:**
+```go
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    // Using variadic parameters
+    result, err := tx.SqlTemplate("user_service.insertUser", "John", "john@example.com", 25).Exec()
+    return err
+})
+```
+
+**Example:**
+```go
+// Using named parameters
+records, err := dbkit.SqlTemplate("user_service.findById", 
+    map[string]interface{}{"id": 123}).Query()
+
+// Using positional parameters
+records, err := dbkit.SqlTemplate("user_service.findById", 
+    []interface{}{123}).Query()
+
+// 🆕 Using single simple parameter (recommended for single-parameter queries)
+records, err := dbkit.SqlTemplate("user_service.findById", 123).Query()
+records, err := dbkit.SqlTemplate("user_service.findByEmail", "user@example.com").Query()
+records, err := dbkit.SqlTemplate("user_service.findActive", true).Query()
+```
+
+#### SqlTemplate (Database Specific)
+```go
+func (db *DB) SqlTemplate(name string, params interface{}) *SqlTemplateBuilder
+```
+Create SQL template builder on a specific database.
+
+**Example:**
+```go
+// Traditional way
+records, err := dbkit.Use("mysql").SqlTemplate("user_service.findById", 
+    map[string]interface{}{"id": 123}).Query()
+
+// 🆕 Single simple parameter (more concise)
+records, err := dbkit.Use("mysql").SqlTemplate("user_service.findById", 123).Query()
+```
+
+#### SqlTemplate (Transaction)
+```go
+func (tx *Tx) SqlTemplate(name string, params interface{}) *SqlTemplateBuilder
+```
+Use SQL templates within transactions.
+
+**Example:**
+```go
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    result, err := tx.SqlTemplate("user_service.insertUser", userParams).Exec()
+    return err
+})
+```
+
+### SqlTemplateBuilder Methods
+
+#### Timeout
+```go
+func (b *SqlTemplateBuilder) Timeout(timeout time.Duration) *SqlTemplateBuilder
+```
+Set query timeout.
+
+**Example:**
+```go
+records, err := dbkit.SqlTemplate("user_service.findUsers", params).
+    Timeout(30 * time.Second).Query()
+```
+
+#### Query
+```go
+func (b *SqlTemplateBuilder) Query() ([]Record, error)
+```
+Execute query and return multiple records.
+
+#### QueryFirst
+```go
+func (b *SqlTemplateBuilder) QueryFirst() (*Record, error)
+```
+Execute query and return the first record.
+
+#### Exec
+```go
+func (b *SqlTemplateBuilder) Exec() (sql.Result, error)
+```
+Execute SQL statement (INSERT, UPDATE, DELETE).
+
+### Dynamic SQL Building
+
+Dynamic SQL condition building can be achieved through `inparam` configuration:
+
+```json
+{
+  "name": "searchUsers",
+  "sql": "SELECT * FROM users WHERE 1=1",
+  "inparam": [
+    {
+      "name": "status",
+      "type": "int",
+      "desc": "User status",
+      "sql": " AND status = :status"
+    },
+    {
+      "name": "ageMin",
+      "type": "int", 
+      "desc": "Minimum age",
+      "sql": " AND age >= :ageMin"
+    }
+  ],
+  "order": "created_at DESC"
+}
+```
+
+**Usage Example:**
+```go
+// Only pass partial parameters, system will automatically build corresponding SQL
+params := map[string]interface{}{
+    "status": 1,
+    // ageMin not provided, corresponding condition won't be added
+}
+records, err := dbkit.SqlTemplate("searchUsers", params).Query()
+// Generated SQL: SELECT * FROM users WHERE 1=1 AND status = ? ORDER BY created_at DESC
+```
+
+### Parameter Processing
+
+#### Named Parameters
+Use `:paramName` format for named parameters:
+
+```go
+params := map[string]interface{}{
+    "id": 123,
+    "name": "John",
+}
+records, err := dbkit.SqlTemplate("user_service.updateUser", params).Exec()
+```
+
+#### Positional Parameters
+Use `?` placeholders for positional parameters:
+
+```go
+params := []interface{}{123}
+records, err := dbkit.SqlTemplate("user_service.findById", params).Query()
+```
+
+### Error Handling
+
+The SQL template system provides detailed error information:
+
+```go
+type SqlConfigError struct {
+    Type    string // Error type: NotFoundError, ParameterError, ParseError, etc.
+    Message string // Error description
+    SqlName string // Related SQL name
+    Cause   error  // Original error
+}
+```
+
+**Common Error Types:**
+- `NotFoundError`: SQL template not found
+- `ParameterError`: Parameter error (missing, type mismatch, etc.)
+- `ParameterTypeMismatch`: Parameter type doesn't match SQL format
+- `ParseError`: Configuration file parsing error
+- `DuplicateError`: Duplicate SQL identifier
+
+### Best Practices
+
+1. **Naming Convention**: Use namespaces to avoid SQL name conflicts
+2. **Parameter Validation**: System automatically validates required parameters
+3. **Dynamic Conditions**: Use `inparam` for flexible condition building
+4. **Error Handling**: Catch and handle `SqlConfigError` type errors
+5. **Performance Optimization**: Configuration files are cached after first load
+
+**Complete Example:**
+```go
+// 1. Load configuration
+err := dbkit.LoadSqlConfigDir("config/")
+if err != nil {
+    log.Fatal(err)
+}
+
+// 2. Execute query
+params := map[string]interface{}{
+    "status": 1,
+    "name": "John",
+}
+
+records, err := dbkit.Use("mysql").
+    SqlTemplate("user_service.findUsers", params).
+    Timeout(30 * time.Second).
+    Query()
+
+if err != nil {
+    if sqlErr, ok := err.(*dbkit.SqlConfigError); ok {
+        log.Printf("SQL config error [%s]: %s", sqlErr.Type, sqlErr.Message)
+    } else {
+        log.Printf("Execution error: %v", err)
+    }
+    return
+}
+
+// 3. Process results
+for _, record := range records {
+    fmt.Printf("User: %s, Status: %d\n", 
+        record.GetString("name"), 
+        record.GetInt("status"))
+}
 ```
 
 ---

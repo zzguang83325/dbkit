@@ -1,0 +1,108 @@
+{
+  "version": "1.0",
+  "description": "用户服务SQL配置",
+  "namespace": "user_service",
+  "sqls": [
+    {
+      "name": "findById",
+      "description": "根据ID查找用户",
+      "sql": "SELECT * FROM users WHERE id = ?",
+      "type": "select"
+    },
+    {
+      "name": "findByEmail",
+      "description": "根据邮箱查找用户",
+      "sql": "SELECT * FROM users WHERE email = ?",
+      "type": "select"
+    },
+    {
+      "name": "findUsers",
+      "description": "动态查询用户列表",
+      "sql": "SELECT * FROM users WHERE 1=1",
+      "type": "select",
+      "order": "created_at DESC",
+      "inparam": [
+        {
+          "name": "status",
+          "type": "int",
+          "desc": "用户状态",
+          "sql": " AND status = ?"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "desc": "用户名模糊查询",
+          "sql": " AND name LIKE CONCAT('%', ?, '%')"
+        },
+        {
+          "name": "ageMin",
+          "type": "int",
+          "desc": "最小年龄",
+          "sql": " AND age >= ?"
+        },
+        {
+          "name": "ageMax",
+          "type": "int",
+          "desc": "最大年龄",
+          "sql": " AND age <= ?"
+        },
+        {
+          "name": "city",
+          "type": "string",
+          "desc": "城市",
+          "sql": " AND city = ?"
+        }
+      ]
+    },
+    {
+      "name": "countUsers",
+      "description": "统计用户数量",
+      "sql": "SELECT COUNT(*) as total FROM users WHERE 1=1",
+      "type": "select",
+      "inparam": [
+        {
+          "name": "status",
+          "type": "int",
+          "desc": "用户状态",
+          "sql": " AND status = ?"
+        },
+        {
+          "name": "city",
+          "type": "string",
+          "desc": "城市",
+          "sql": " AND city = ?"
+        }
+      ]
+    },
+    {
+      "name": "insertUser",
+      "description": "插入新用户",
+      "sql": "INSERT INTO users (name, email, age, city, status, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
+      "type": "insert"
+    },
+    {
+      "name": "updateUser",
+      "description": "更新用户信息",
+      "sql": "UPDATE users SET name = :name, email = :email, age = :age, city = :city, updated_at = NOW() WHERE id = :id",
+      "type": "update"
+    },
+    {
+      "name": "updateUserStatus",
+      "description": "更新用户状态",
+      "sql": "UPDATE users SET status = :status, updated_at = NOW() WHERE id = :id",
+      "type": "update"
+    },
+    {
+      "name": "deleteUser",
+      "description": "删除用户",
+      "sql": "DELETE FROM users WHERE id = ?",
+      "type": "delete"
+    },
+    {
+      "name": "getUserProfile",
+      "description": "获取用户详细信息",
+      "sql": "SELECT u.*, p.bio, p.avatar FROM users u LEFT JOIN user_profiles p ON u.id = p.user_id WHERE u.id = ?",
+      "type": "select"
+    }
+  ]
+}
