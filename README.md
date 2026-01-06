@@ -1408,14 +1408,24 @@ users, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query(
 result, err := dbkit.SqlTemplate("user_service.updateUser", 
     "John Doe", "john@example.com", 30, 123).Exec()
 
-// 4. 命名参数（适用于复杂查询）
+// 4. 分页查询（新增功能）
+pageObj, err := dbkit.SqlTemplate("user_service.findActiveUsers", 1).Paginate(1, 10)
+if err == nil {
+    fmt.Printf("第%d页（共%d页），总条数: %d\n", 
+        pageObj.PageNumber, pageObj.TotalPage, pageObj.TotalRow)
+    for _, user := range pageObj.List {
+        fmt.Printf("用户: %s\n", user.Str("name"))
+    }
+}
+
+// 5. 命名参数（适用于复杂查询）
 params := map[string]interface{}{
     "name": "John",
     "status": 1,
 }
 users, err := dbkit.SqlTemplate("user_service.findByNamedParams", params).Query()
 
-// 5. 位置参数数组（向后兼容）
+// 6. 位置参数数组（向后兼容）
 users, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 
     []interface{}{123, 1}).Query()
 ```
@@ -1426,15 +1436,33 @@ users, err := dbkit.SqlTemplate("user_service.findByIdAndStatus",
 // 指定数据库执行
 users, err := dbkit.Use("mysql").SqlTemplate("findUsers", 123, 1).Query()
 
+// 指定数据库执行分页查询
+pageObj, err := dbkit.Use("mysql").SqlTemplate("findUsers", 123, 1).Paginate(1, 20)
+
 // 事务中使用
 err := dbkit.Transaction(func(tx *dbkit.Tx) error {
     result, err := tx.SqlTemplate("insertUser", "John", "john@example.com", 25).Exec()
     return err
 })
 
+// 事务中使用分页查询
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    pageObj, err := tx.SqlTemplate("findOrders", userId).Paginate(1, 10)
+    if err != nil {
+        return err
+    }
+    // 处理分页结果...
+    return nil
+})
+
 // 设置超时
 users, err := dbkit.SqlTemplate("findUsers", 123).
     Timeout(30 * time.Second).Query()
+
+// 分页查询设置超时
+pageObj, err := dbkit.SqlTemplate("complexQuery", params).
+    Timeout(30 * time.Second).
+    Paginate(1, 50)
 ```
 
 #### 参数数量验证

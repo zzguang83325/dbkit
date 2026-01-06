@@ -2089,6 +2089,58 @@ func (b *SqlTemplateBuilder) Exec() (sql.Result, error)
 ```
 Execute SQL statement (INSERT, UPDATE, DELETE).
 
+#### Paginate
+```go
+func (b *SqlTemplateBuilder) Paginate(page int, pageSize int) (*Page[Record], error)
+```
+Execute SQL template and return paginated results. Uses complete SQL statement for pagination query, automatically parses SQL and generates corresponding pagination statements based on database type.
+
+**Parameters:**
+- `page`: Page number (starting from 1)
+- `pageSize`: Number of records per page
+
+**Returns:**
+- `*Page[Record]`: Pagination result object
+- `error`: Error information
+
+**Examples:**
+```go
+// Basic pagination query
+pageObj, err := dbkit.SqlTemplate("user_service.findActiveUsers", 1).
+    Paginate(1, 10)
+
+// Pagination with parameters
+pageObj, err := dbkit.SqlTemplate("user_service.findByStatus", "active", 18).
+    Paginate(2, 20)
+
+// Execute pagination on specific database
+pageObj, err := dbkit.Use("mysql").SqlTemplate("findUsers", params).
+    Paginate(1, 15)
+
+// Execute pagination in transaction
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    pageObj, err := tx.SqlTemplate("findOrders", userId).Paginate(1, 10)
+    // Process pagination results...
+    return err
+})
+
+// Pagination with timeout
+pageObj, err := dbkit.SqlTemplate("complexQuery", params).
+    Timeout(30 * time.Second).
+    Paginate(1, 50)
+
+// Access pagination results
+if err == nil {
+    fmt.Printf("Page %d of %d, Total: %d\n", 
+        pageObj.PageNumber, pageObj.TotalPage, pageObj.TotalRow)
+    
+    for _, record := range pageObj.List {
+        fmt.Printf("User: %s, Age: %d\n", 
+            record.Str("name"), record.Int("age"))
+    }
+}
+```
+
 ### Dynamic SQL Building
 
 Dynamic SQL condition building can be achieved through `inparam` configuration:

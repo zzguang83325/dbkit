@@ -1958,7 +1958,7 @@ func SqlTemplate(name string, params ...interface{}) *SqlTemplateBuilder
   - `map[string]interface{}` - 命名参数（`:name`）
   - `[]interface{}` - 位置参数数组（`?`）
   - **单个简单类型** - 单个位置参数（`?`），支持 `string`、`int`、`float`、`bool` 等基本类型
-  - **🆕 可变参数** - 多个位置参数（`?`），直接传递多个值
+  - ** 可变参数** - 多个位置参数（`?`），直接传递多个值
 
 **示例:**
 ```go
@@ -1970,11 +1970,11 @@ records, err := dbkit.SqlTemplate("user_service.findById",
 records, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 
     []interface{}{123, 1}).Query()
 
-// 🆕 使用单个简单参数（推荐用于单参数查询）
+// 使用单个简单参数（推荐用于单参数查询）
 records, err := dbkit.SqlTemplate("user_service.findById", 123).Query()
 records, err := dbkit.SqlTemplate("user_service.findByEmail", "user@example.com").Query()
 
-// 🆕 使用可变参数（推荐用于多参数查询）
+// 使用可变参数（推荐用于多参数查询）
 records, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query()
 records, err := dbkit.SqlTemplate("user_service.updateUser", "John", "john@example.com", 25, 123).Exec()
 records, err := dbkit.SqlTemplate("user_service.findByAgeRange", 18, 65, 1).Query()
@@ -2045,6 +2045,58 @@ func (b *SqlTemplateBuilder) QueryFirst() (*Record, error)
 func (b *SqlTemplateBuilder) Exec() (sql.Result, error)
 ```
 执行 SQL 语句（INSERT、UPDATE、DELETE）。
+
+#### Paginate
+```go
+func (b *SqlTemplateBuilder) Paginate(page int, pageSize int) (*Page[Record], error)
+```
+执行 SQL 模板并返回分页结果。使用完整 SQL 语句进行分页查询，自动解析 SQL 并根据数据库类型生成相应的分页语句。
+
+**参数:**
+- `page`: 页码（从 1 开始）
+- `pageSize`: 每页记录数
+
+**返回:**
+- `*Page[Record]`: 分页结果对象
+- `error`: 错误信息
+
+**示例:**
+```go
+// 基本分页查询
+pageObj, err := dbkit.SqlTemplate("user_service.findActiveUsers", 1).
+    Paginate(1, 10)
+
+// 带参数的分页查询
+pageObj, err := dbkit.SqlTemplate("user_service.findByStatus", "active", 18).
+    Paginate(2, 20)
+
+// 在指定数据库上执行分页
+pageObj, err := dbkit.Use("mysql").SqlTemplate("findUsers", params).
+    Paginate(1, 15)
+
+// 事务中执行分页
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    pageObj, err := tx.SqlTemplate("findOrders", userId).Paginate(1, 10)
+    // 处理分页结果...
+    return err
+})
+
+// 带超时的分页查询
+pageObj, err := dbkit.SqlTemplate("complexQuery", params).
+    Timeout(30 * time.Second).
+    Paginate(1, 50)
+
+// 访问分页结果
+if err == nil {
+    fmt.Printf("第%d页（共%d页），总条数: %d\n", 
+        pageObj.PageNumber, pageObj.TotalPage, pageObj.TotalRow)
+    
+    for _, record := range pageObj.List {
+        fmt.Printf("用户: %s, 年龄: %d\n", 
+            record.Str("name"), record.Int("age"))
+    }
+}
+```
 
 ### 动态 SQL 构建
 

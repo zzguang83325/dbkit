@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/zzguang83325/dbkit"
@@ -33,6 +34,7 @@ func main() {
 	fmt.Println("\n【步骤 3: 基础查询】")
 	demonstrateBasicQuery()
 
+	demonstratePaginate() //分页查询
 	// 步骤 4: 插入操作
 	fmt.Println("\n【步骤 4: 插入数据】")
 	demonstrateInsert()
@@ -126,6 +128,65 @@ func demonstrateBasicQuery() {
 			record2.Get("id"), record2.Get("name"), record2.Get("email"))
 	} else {
 		fmt.Println("⚠️  未找到该邮箱的用户")
+	}
+}
+
+// 分页查询演示
+func demonstratePaginate() {
+	fmt.Println("\n--- SQL 模板分页查询演示 ---")
+
+	// 基本分页查询
+	fmt.Println("1. 基本分页查询（第1页，每页5条）")
+	pageObj, err := dbkit.SqlTemplate("user_service.findUsers").Paginate(1, 5)
+	if err != nil {
+		log.Printf("❌ 分页查询失败: %v", err)
+		return
+	}
+
+	if pageObj != nil {
+		fmt.Printf("✅ 分页查询成功: 第%d页（共%d页），总条数: %d\n",
+			pageObj.PageNumber, pageObj.TotalPage, pageObj.TotalRow)
+
+		for i, record := range pageObj.List {
+			fmt.Printf("   %d. ID=%v, Name=%v, Email=%v\n",
+				i+1, record.Get("id"), record.Get("name"), record.Get("email"))
+		}
+	}
+
+	// 带参数的分页查询
+	fmt.Println("\n2. 带参数的分页查询（查询状态为1的用户，第2页）")
+	params := map[string]interface{}{
+		"status": 1,
+	}
+	pageObj2, err := dbkit.SqlTemplate("user_service.findUsers", params).Paginate(2, 3)
+	if err != nil {
+		log.Printf("❌ 带参数分页查询失败: %v", err)
+		return
+	}
+
+	if pageObj2 != nil {
+		fmt.Printf("✅ 带参数分页查询成功: 第%d页（共%d页），总条数: %d\n",
+			pageObj2.PageNumber, pageObj2.TotalPage, pageObj2.TotalRow)
+
+		for i, record := range pageObj2.List {
+			fmt.Printf("   %d. ID=%v, Name=%v, Status=%v\n",
+				i+1, record.Get("id"), record.Get("name"), record.Get("status"))
+		}
+	}
+
+	// 带超时的分页查询
+	fmt.Println("\n3. 带超时的分页查询（30秒超时）")
+	pageObj3, err := dbkit.SqlTemplate("user_service.findUsers").
+		Timeout(30*time.Second).
+		Paginate(1, 10)
+	if err != nil {
+		log.Printf("❌ 超时分页查询失败: %v", err)
+		return
+	}
+
+	if pageObj3 != nil {
+		fmt.Printf("✅ 超时分页查询成功: 第%d页（共%d页），总条数: %d\n",
+			pageObj3.PageNumber, pageObj3.TotalPage, pageObj3.TotalRow)
 	}
 }
 

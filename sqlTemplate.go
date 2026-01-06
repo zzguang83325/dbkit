@@ -574,6 +574,48 @@ func (b *SqlTemplateBuilder) Query() ([]Record, error) {
 	}
 }
 
+// Paginate executes the SQL template and return page Object
+func (b *SqlTemplateBuilder) Paginate(page int, pageSize int) (*Page[Record], error) {
+	finalSQL, args, err := b.buildFinalSQL()
+	if err != nil {
+		return nil, err
+	}
+
+	// Log SQL execution in debug mode
+	LogDebug("Executing SQL template Paginate", map[string]interface{}{
+		"sqlName":    b.sqlName,
+		"finalSQL":   finalSQL,
+		"paramCount": len(args),
+		"timeout":    b.timeout.String(),
+		"hasDB":      b.dbName != "",
+		"hasTx":      b.tx != nil,
+	})
+
+	if b.tx != nil {
+		// Execute in transaction context
+		if b.timeout > 0 {
+			return b.tx.Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
+		}
+		return b.tx.Paginate(page, pageSize, finalSQL, args...)
+	} else if b.dbName != "" {
+		// Execute on specific database
+		db := Use(b.dbName)
+		if db.lastErr != nil {
+			return nil, db.lastErr
+		}
+		if b.timeout > 0 {
+			return db.Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
+		}
+		return db.Paginate(page, pageSize, finalSQL, args...)
+	} else {
+		// Execute on default database
+		if b.timeout > 0 {
+			return Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
+		}
+		return Paginate(page, pageSize, finalSQL, args...)
+	}
+}
+
 // QueryFirst executes the SQL template and returns a single record
 func (b *SqlTemplateBuilder) QueryFirst() (*Record, error) {
 	finalSQL, args, err := b.buildFinalSQL()

@@ -946,21 +946,31 @@ err := dbkit.LoadSqlConfigDir("config/")
 // 1. Single simple parameter
 user, err := dbkit.SqlTemplate("user_service.findById", 123).QueryFirst()
 
-// 2. 🆕 Variadic parameters (recommended for multi-parameter queries)
+// 2. Variadic parameters (recommended for multi-parameter queries)
 users, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 123, 1).Query()
 
 // 3. Update operations
 result, err := dbkit.SqlTemplate("user_service.updateUser", 
     "John Doe", "john@example.com", 30, 123).Exec()
 
-// 4. Named parameters (suitable for complex queries)
+// 4. Pagination queries 
+pageObj, err := dbkit.SqlTemplate("user_service.findActiveUsers", 1).Paginate(1, 10)
+if err == nil {
+    fmt.Printf("Page %d of %d, Total: %d\n", 
+        pageObj.PageNumber, pageObj.TotalPage, pageObj.TotalRow)
+    for _, user := range pageObj.List {
+        fmt.Printf("User: %s\n", user.Str("name"))
+    }
+}
+
+// 5. Named parameters (suitable for complex queries)
 params := map[string]interface{}{
     "name": "John",
     "status": 1,
 }
 users, err := dbkit.SqlTemplate("user_service.findByNamedParams", params).Query()
 
-// 5. Positional parameter array (backward compatible)
+// 6. Positional parameter array (backward compatible)
 users, err := dbkit.SqlTemplate("user_service.findByIdAndStatus", 
     []interface{}{123, 1}).Query()
 ```
@@ -971,15 +981,33 @@ users, err := dbkit.SqlTemplate("user_service.findByIdAndStatus",
 // Execute on specific database
 users, err := dbkit.Use("mysql").SqlTemplate("findUsers", 123, 1).Query()
 
+// Execute pagination on specific database
+pageObj, err := dbkit.Use("mysql").SqlTemplate("findUsers", 123, 1).Paginate(1, 20)
+
 // Use in transactions
 err := dbkit.Transaction(func(tx *dbkit.Tx) error {
     result, err := tx.SqlTemplate("insertUser", "John", "john@example.com", 25).Exec()
     return err
 })
 
+// Use pagination in transactions
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    pageObj, err := tx.SqlTemplate("findOrders", userId).Paginate(1, 10)
+    if err != nil {
+        return err
+    }
+    // Process pagination results...
+    return nil
+})
+
 // Set timeout
 users, err := dbkit.SqlTemplate("findUsers", 123).
     Timeout(30 * time.Second).Query()
+
+// Pagination with timeout
+pageObj, err := dbkit.SqlTemplate("complexQuery", params).
+    Timeout(30 * time.Second).
+    Paginate(1, 50)
 ```
 
 #### Parameter Count Validation
