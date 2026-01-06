@@ -46,18 +46,18 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 		return fmt.Errorf("no columns found for table '%s'. please check if the table exists and you have access permissions", tablename)
 	}
 
-	// 1. 处理路径和包名
+	// 1. Handle path and package name
 	var pkgName string
 	var finalPath string
 
 	if outPath == "" {
-		// 如果没有路径，默认在当前目录生成 models 包
+		// If no path provided, generate models package in current directory
 		pkgName = "models"
 		finalPath = filepath.Join("models", strings.ToLower(tablename)+".go")
 	} else {
-		// 检查 outPath 是目录还是文件
+		// Check if outPath is a directory or file
 		if strings.HasSuffix(outPath, ".go") {
-			// 是文件路径
+			// Is file path
 			finalPath = outPath
 			dir := filepath.Dir(outPath)
 			if dir == "." || dir == "/" {
@@ -66,7 +66,7 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 				pkgName = filepath.Base(dir)
 			}
 		} else {
-			// 是目录路径
+			// Is directory path
 			pkgName = filepath.Base(outPath)
 			if pkgName == "." || pkgName == "/" {
 				pkgName = "models"
@@ -75,17 +75,17 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 		}
 	}
 
-	// 2. 确定结构体名称 (如果 structName 为空，则根据表名生成)
+	// 2. Determine struct name (if structName is empty, generate from table name)
 	finalStructName := structName
 	if finalStructName == "" {
 		finalStructName = SnakeToCamel(tablename)
 	}
 
-	// 3. 构建代码内容
+	// 3. Build code content
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("package %s\n\n", pkgName))
 
-	// 检查是否需要导入 time
+	// Check if time import is needed
 	hasTime := false
 	for _, col := range columns {
 		if strings.Contains(dbTypeToGoType(col.Type, col.Nullable), "time.Time") {
@@ -93,8 +93,10 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 			break
 		}
 	}
+	// Cache method always needs time.Duration, so always import time package
+	hasTime = true
 
-	// 生成 import
+	// Generate import
 	sb.WriteString("import (\n")
 	if hasTime {
 		sb.WriteString("\t\"time\"\n")
@@ -106,7 +108,7 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 
 	sb.WriteString(fmt.Sprintf("// %s represents the %s table\n", finalStructName, tablename))
 	sb.WriteString(fmt.Sprintf("type %s struct {\n", finalStructName))
-	// 嵌入 ModelCache 以支持缓存功能
+	// Embed ModelCache to support caching functionality
 	sb.WriteString("\tdbkit.ModelCache\n")
 
 	for _, col := range columns {
@@ -124,32 +126,32 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 
 	sb.WriteString("}\n\n")
 
-	// 添加 TableName 方法
+	// Add TableName method
 	sb.WriteString(fmt.Sprintf("// TableName returns the table name for %s struct\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) TableName() string {\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("\treturn \"%s\"\n", tablename))
 	sb.WriteString("}\n\n")
 
-	// 添加 DatabaseName 方法
+	// Add DatabaseName method
 	sb.WriteString(fmt.Sprintf("// DatabaseName returns the database name for %s struct\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) DatabaseName() string {\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("\treturn \"%s\"\n", db.dbMgr.name))
 	sb.WriteString("}\n\n")
 
-	// 添加 Cache 方法（返回自身类型以支持链式调用）
+	// Add Cache method (returns self type to support method chaining)
 	sb.WriteString(fmt.Sprintf("// Cache sets the cache name and TTL for the next query\n"))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Cache(name string, ttl ...time.Duration) *%s {\n", finalStructName, finalStructName))
 	sb.WriteString("\tm.SetCache(name, ttl...)\n")
 	sb.WriteString("\treturn m\n")
 	sb.WriteString("}\n\n")
 
-	// 添加 ToJson 方法
+	// Add ToJson method
 	sb.WriteString(fmt.Sprintf("// ToJson converts %s to a JSON string\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) ToJson() string {\n", finalStructName))
 	sb.WriteString("\treturn dbkit.ToJson(m)\n")
 	sb.WriteString("}\n\n")
 
-	// 添加 ActiveRecord 成员方法 (Save, Insert, Update, Delete)
+	// Add ActiveRecord member methods (Save, Insert, Update, Delete)
 	sb.WriteString(fmt.Sprintf("// Save saves the %s record (insert or update)\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Save() (int64, error) {\n", finalStructName))
 	sb.WriteString("\treturn dbkit.SaveDbModel(m)\n")
@@ -182,14 +184,14 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 	sb.WriteString("\treturn dbkit.RestoreModel(m)\n")
 	sb.WriteString("}\n\n")
 
-	// 使用泛型函数简化 FindFirst
+	// Use generic function to simplify FindFirst
 	sb.WriteString(fmt.Sprintf("// FindFirst finds the first %s record based on conditions\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) FindFirst(whereSql string, args ...interface{}) (*%s, error) {\n", finalStructName, finalStructName))
 	sb.WriteString(fmt.Sprintf("\tresult := &%s{}\n", finalStructName))
 	sb.WriteString("\treturn dbkit.FindFirstModel(result, m.GetCache(), whereSql, args...)\n")
 	sb.WriteString("}\n\n")
 
-	// 使用泛型函数简化 Find
+	// Use generic function to simplify Find
 	sb.WriteString(fmt.Sprintf("// Find finds %s records based on conditions\n", finalStructName))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Find(whereSql string, orderBySql string, args ...interface{}) ([]*%s, error) {\n", finalStructName, finalStructName))
 	sb.WriteString(fmt.Sprintf("\treturn dbkit.FindModel[*%s](m, m.GetCache(), whereSql, orderBySql, args...)\n", finalStructName))
@@ -207,14 +209,21 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 	sb.WriteString(fmt.Sprintf("\treturn dbkit.FindModelOnlyTrashed[*%s](m, m.GetCache(), whereSql, orderBySql, args...)\n", finalStructName))
 	sb.WriteString("}\n\n")
 
-	// 使用泛型函数简化 Paginate
-	sb.WriteString(fmt.Sprintf("// Paginate paginates %s records based on conditions\n", finalStructName))
-	sb.WriteString(fmt.Sprintf("func (m *%s) Paginate(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*%s], error) {\n", finalStructName, finalStructName))
+	// Use generic function to simplify PaginateBuilder (traditional builder-style pagination)
+	sb.WriteString(fmt.Sprintf("// PaginateBuilder paginates %s records based on conditions (traditional method)\n", finalStructName))
+	sb.WriteString(fmt.Sprintf("func (m *%s) PaginateBuilder(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*%s], error) {\n", finalStructName, finalStructName))
 	sb.WriteString(fmt.Sprintf("\treturn dbkit.PaginateModel[*%s](m, m.GetCache(), page, pageSize, whereSql, orderBy, args...)\n", finalStructName))
-	sb.WriteString("}\n")
+	sb.WriteString("}\n\n")
 
-	// 4. 写入文件
-	// 确保目录存在
+	// Add Paginate method (full SQL pagination - recommended)
+	sb.WriteString(fmt.Sprintf("// Paginate paginates %s records using complete SQL statement (recommended)\n", finalStructName))
+	sb.WriteString(fmt.Sprintf("// Uses complete SQL statement for pagination query, automatically parses SQL and generates corresponding pagination statements based on database type\n"))
+	sb.WriteString(fmt.Sprintf("func (m *%s) Paginate(page int, pageSize int, fullSQL string, args ...interface{}) (*dbkit.Page[*%s], error) {\n", finalStructName, finalStructName))
+	sb.WriteString(fmt.Sprintf("\treturn dbkit.PaginateModel_FullSql[*%s](m, m.GetCache(), page, pageSize, fullSQL, args...)\n", finalStructName))
+	sb.WriteString("}\n\n")
+
+	// 4. Write to file
+	// Ensure directory exists
 	dir := filepath.Dir(finalPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %v", err)
@@ -234,11 +243,11 @@ func (mgr *dbManager) getTableColumns(table string) ([]ColumnInfo, error) {
 
 	switch driver {
 	case MySQL:
-		// 先尝试从 INFORMATION_SCHEMA 获取详细信息
+		// First try to get detailed information from INFORMATION_SCHEMA
 		query := "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_COMMENT, COLUMN_KEY FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ? AND TABLE_SCHEMA = (SELECT DATABASE()) ORDER BY ORDINAL_POSITION"
 		records, err := mgr.query(mgr.getDB(), query, table)
 		if err != nil || len(records) == 0 {
-			// 如果失败或为空，尝试简单的 SHOW COLUMNS
+			// If failed or empty, try simple SHOW COLUMNS
 			query = fmt.Sprintf("SHOW COLUMNS FROM `%s`", table)
 			records, err = mgr.query(mgr.getDB(), query)
 			if err != nil {

@@ -171,10 +171,17 @@ func (db *DB) FindAll(table string) ([]Record, error)
 
 ### Paginate
 ```go
-func Paginate(page, pageSize int, selectSql, table, whereSql, orderBySql string, args ...interface{}) (*Page[Record], error)
-func (db *DB) Paginate(page, pageSize int, selectSql, table, whereSql, orderBySql string, args ...interface{}) (*Page[Record], error)
+func Paginate(page, pageSize int, querySQL string, args ...interface{}) (*Page[Record], error)
+func (db *DB) Paginate(page, pageSize int, querySQL string, args ...interface{}) (*Page[Record], error)
 ```
-分页查询。
+分页查询（推荐使用）。使用完整SQL语句进行分页查询，自动解析SQL并根据数据库类型生成相应的分页语句。
+
+### PaginateBuilder
+```go
+func PaginateBuilder(page, pageSize int, selectSql, table, whereSql, orderBySql string, args ...interface{}) (*Page[Record], error)
+func (db *DB) PaginateBuilder(page, pageSize int, selectSql, table, whereSql, orderBySql string, args ...interface{}) (*Page[Record], error)
+```
+传统构建式分页查询。通过分别指定SELECT、表名、WHERE和ORDER BY子句进行分页查询。
 
 **参数:**
 - `page`: 页码（从1开始）

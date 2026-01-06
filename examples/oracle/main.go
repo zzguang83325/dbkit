@@ -134,7 +134,7 @@ func demoDbModelOperations() {
 	}
 
 	// 5. Paginate (Read)
-	page, err := model.Paginate(1, 10, "AGE > ?", "ID ASC", 20)
+	page, err := model.PaginateBuilder(1, 10, "AGE > ?", "ID ASC", 20)
 	if err != nil {
 		log.Printf("Oracle DbModel Paginate failed: %v", err)
 	} else {

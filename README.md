@@ -215,12 +215,12 @@ func main() {
 
 	page := 1
 	perPage := 10
-	dataPage, totals, err := dbkit.Paginate(page, perPage, "SELECT *", "tablename", "status=?", "id ASC",1)
+	pageObj, err := dbkit.Paginate(page, perPage, "SELECT * from tablename where status=?", "id ASC",1)
 	if err != nil {
 		log.Printf("分页查询失败: %v", err)
 	} else {
-		fmt.Printf("  第%d页（每页%d条），总数: %d\n", page, perPage, totals)
-		for i, d := range dataPage {
+		fmt.Printf("  第%d页（共%d页），总条数: %d\n", pageObj.PageNumber, pageObj.TotalPage, pageObj.TotalRow)
+		for i, d := range pageObj.List {
 			fmt.Printf("    %d. %s (ID: %d)\n", i+1, d.GetString("name"), d.GetInt("id"))
 		}
 	}
@@ -259,7 +259,7 @@ for _, u := range users {
 }
 
 //分页查询
-pageObj, err := foundUser.Paginate(1, 10, "id>?", "id desc",1)
+pageObj, err := foundUser.Paginate(1, 10, "select * from user where id>?",1)
 if err != nil {
 	return
 }
@@ -374,19 +374,35 @@ if dbkit.Exists("users", "name = ?", "张三") {
 
 #### 分页查询 (Paginate)
 
-DBKit 的分页查询非常智能，它会自动分析 SQL 语句，并尝试优化 `COUNT(*)` 查询以提高性能。如果无法优化（如包含 `DISTINCT` 或 `GROUP BY`），则会自动降级为子查询模式。
+DBKit 提供了两种分页查询方式：推荐使用的 `Paginate` 方法和传统的 `PaginateBuilder` 方法。
+
+##### 推荐方式：Paginate 方法
+
+使用完整SQL语句进行分页查询，DBKit会自动分析SQL并优化 `COUNT(*)` 查询以提高性能。
 
 ```go
 // 方式 1：操作默认数据库
-// 参数：页码, 每页数量, SELECT 部分, 表名, WHERE 部分, ORDER BY 部分, 动态参数
-// 返回：page列表,  错误
-userspage, total, err := dbkit.Paginate(1, 10, "select id, name, age", "users", "age > ?", "id DESC", 18)
+// 参数：页码, 每页数量, 完整SQL语句, 动态参数
+// 返回：分页对象, 错误
+pageObj, err := dbkit.Paginate(1, 10, "SELECT id, name, age FROM users WHERE age > ? ORDER BY id DESC", 18)
 
 fmt.Printf("  第%d页（共%d页），总条数: %d\n", pageObj.PageNumber, pageObj.TotalPage, pageObj.TotalRow)
 
 // 方式 2：指定数据库
+pageObj2, err := dbkit.Use("default").Paginate(1, 10, "SELECT * FROM users WHERE age > ? ORDER BY id DESC", 18)
+```
+
+##### 传统方式：PaginateBuilder 方法
+
+通过分别指定SELECT、表名、WHERE和ORDER BY子句进行分页查询。
+
+```go
+// 传统构建式分页
 // 参数：页码, 每页数量, SELECT 部分, 表名, WHERE 部分, ORDER BY 部分, 动态参数
-dbkit.Use("default").Paginate(1, 10, "SELECT *", "users", "age > ?", "id DESC", 18)
+pageObj, err := dbkit.PaginateBuilder(1, 10, "SELECT id, name, age", "users", "age > ?", "id DESC", 18)
+
+// 指定数据库的传统方式
+pageObj2, err := dbkit.Use("default").PaginateBuilder(1, 10, "SELECT *", "users", "age > ?", "id DESC", 18)
 ```
 
 

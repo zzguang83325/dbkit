@@ -5,20 +5,20 @@ import (
 	"regexp"
 )
 
-// 预编译正则表达式以提高性能
+// Pre-compiled regular expressions for better performance
 var (
-	// identifierPattern 匹配合法的 SQL 标识符
-	// 支持格式: table_name, schema.table_name
-	// 规则: 以字母或下划线开头，后接字母/数字/下划线
+	// identifierPattern matches valid SQL identifiers
+	// Supported formats: table_name, schema.table_name
+	// Rules: starts with letter or underscore, followed by letters/digits/underscores
 	identifierPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$`)
 )
 
 const (
-	// 标识符最大长度（大多数数据库限制在 64-128 之间）
+	// Maximum identifier length (most databases limit between 64-128)
 	maxIdentifierLength = 128
 )
 
-// ErrInvalidTableName 表示无效的表名错误
+// ErrInvalidTableName represents an invalid table name error
 type ErrInvalidTableName struct {
 	Name   string
 	Reason string
@@ -28,14 +28,14 @@ func (e *ErrInvalidTableName) Error() string {
 	return fmt.Sprintf("invalid table name '%s': %s", e.Name, e.Reason)
 }
 
-// validateIdentifier 验证 SQL 标识符（表名/列名等）
-// 规则：
-//   - 长度在 1-128 字符之间
-//   - 以字母或下划线开头
-//   - 只包含字母、数字、下划线
-//   - 可选支持 schema.table 格式
+// validateIdentifier validates SQL identifiers (table names/column names etc.)
+// Rules:
+//   - Length between 1-128 characters
+//   - Starts with letter or underscore
+//   - Contains only letters, digits, underscores
+//   - Optional support for schema.table format
 //
-// 返回错误如果标识符无效
+// Returns error if identifier is invalid
 func validateIdentifier(name string) error {
 	if name == "" {
 		return &ErrInvalidTableName{Name: name, Reason: "name cannot be empty"}
@@ -52,8 +52,8 @@ func validateIdentifier(name string) error {
 	return nil
 }
 
-// ValidateTableName 验证表名是否合法（公开接口）
-// 可供外部调用以提前验证表名
+// ValidateTableName validates if table name is valid (public interface)
+// Can be called externally to validate table names in advance
 func ValidateTableName(table string) error {
 	return validateIdentifier(table)
 }

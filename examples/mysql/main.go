@@ -103,7 +103,7 @@ func testDatabaseConnection() {
 	//   - parseTime: 是否解析时间字段
 	//   - loc: 时区设置
 	dsn := "root:123456@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local"
-	
+
 	// 使用指定的数据库名称打开连接
 	// 参数: 数据库别名, 数据库类型, 连接字符串, 最大连接数
 	err := dbkit.OpenDatabaseWithDBName("mysql", dbkit.MySQL, dsn, 25)
@@ -309,7 +309,7 @@ func testDbModelCRUD() {
 	}
 
 	// Paginate
-	page, err := model.Paginate(1, 10, "age > ?", "id ASC", 20)
+	page, err := model.Paginate(1, 10, "select * from demo where age > ? order by id ASC", 20)
 	if err != nil {
 		log.Printf("❌ DbModel Paginate 失败: %v", err)
 	} else {
@@ -406,7 +406,7 @@ func testPagination() {
 	fmt.Println("\n【6. 分页查询测试】")
 
 	// 使用 Paginate 函数
-	page, err := dbkit.Use("mysql").Paginate(1, 10, "*", "demo", "age > ?", "id ASC", 20)
+	page, err := dbkit.Use("mysql").Paginate(1, 10, "select * from demo where age > ? order by id ASC", 20)
 	if err != nil {
 		log.Printf("❌ Paginate 失败: %v", err)
 	} else {
@@ -548,7 +548,7 @@ func testDbModelCache() {
 
 	// 分页缓存
 	start = time.Now()
-	page, err := model.Cache("page_cache", 60*time.Second).Paginate(1, 10, "age > ?", "id DESC", 20)
+	page, err := model.Cache("page_cache", 60*time.Second).PaginateBuilder(1, 10, "age > ?", "id DESC", 20)
 	if err != nil {
 		log.Printf("❌ DbModel 分页缓存(1st) 失败: %v", err)
 	} else {
@@ -556,7 +556,7 @@ func testDbModelCache() {
 	}
 
 	start = time.Now()
-	page, err = model.Cache("page_cache", 60*time.Second).Paginate(1, 10, "age > ?", "id DESC", 20)
+	page, err = model.Cache("page_cache", 60*time.Second).PaginateBuilder(1, 10, "age > ?", "id DESC", 20)
 	if err != nil {
 		log.Printf("❌ DbModel 分页缓存(2nd) 失败: %v", err)
 	} else {

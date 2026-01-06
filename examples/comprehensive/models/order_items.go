@@ -2,18 +2,17 @@ package models
 
 import (
 	"time"
-
 	"github.com/zzguang83325/dbkit"
 )
 
 // OrderItem represents the order_items table
 type OrderItem struct {
 	dbkit.ModelCache
-	ID        int64   `column:"id" json:"id"`
-	OrderID   int64   `column:"order_id" json:"order_id"`
-	ProductID int64   `column:"product_id" json:"product_id"`
-	Quantity  int64   `column:"quantity" json:"quantity"`
-	Price     float64 `column:"price" json:"price"`
+	ID int64 `column:"id" json:"id"`
+	OrderID int64 `column:"order_id" json:"order_id"`
+	ProductID int64 `column:"product_id" json:"product_id"`
+	Quantity int64 `column:"quantity" json:"quantity"`
+	Price float64 `column:"price" json:"price"`
 }
 
 // TableName returns the table name for OrderItem struct
@@ -88,7 +87,14 @@ func (m *OrderItem) FindOnlyTrashed(whereSql string, orderBySql string, args ...
 	return dbkit.FindModelOnlyTrashed[*OrderItem](m, m.GetCache(), whereSql, orderBySql, args...)
 }
 
-// Paginate paginates OrderItem records based on conditions
-func (m *OrderItem) Paginate(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*OrderItem], error) {
+// PaginateBuilder paginates OrderItem records based on conditions (traditional method)
+func (m *OrderItem) PaginateBuilder(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*OrderItem], error) {
 	return dbkit.PaginateModel[*OrderItem](m, m.GetCache(), page, pageSize, whereSql, orderBy, args...)
 }
+
+// Paginate paginates OrderItem records using complete SQL statement (recommended)
+// 使用完整SQL语句进行分页查询，自动解析SQL并根据数据库类型生成相应的分页语句
+func (m *OrderItem) Paginate(page int, pageSize int, fullSQL string, args ...interface{}) (*dbkit.Page[*OrderItem], error) {
+	return dbkit.PaginateModel_FullSql[*OrderItem](m, m.GetCache(), page, pageSize, fullSQL, args...)
+}
+

@@ -125,7 +125,7 @@ func demoDbModelOperations() {
 	}
 
 	// 5. Paginate (Read)
-	page, err := model.Paginate(1, 10, "age > ?", "id ASC", 20)
+	page, err := model.Paginate(1, 10, "select * from demo where age > ? order by id ASC", 20)
 	if err != nil {
 		log.Printf("SQL Server DbModel Paginate failed: %v", err)
 	} else {

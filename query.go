@@ -191,12 +191,22 @@ func Exists(table string, whereSql string, whereArgs ...interface{}) (bool, erro
 
 }
 
-func Paginate(page int, pageSize int, selectSql string, table string, whereSql string, orderBySql string, args ...interface{}) (*Page[Record], error) {
+func PaginateBuilder(page int, pageSize int, selectSql string, table string, whereSql string, orderBySql string, args ...interface{}) (*Page[Record], error) {
 	db, err := defaultDB()
 	if err != nil {
 		return nil, err
 	}
-	return db.Paginate(page, pageSize, selectSql, table, whereSql, orderBySql, args...)
+	return db.PaginateBuilder(page, pageSize, selectSql, table, whereSql, orderBySql, args...)
+}
+
+// Paginate 全局分页函数，使用完整SQL语句进行分页查询
+// 自动解析SQL并根据数据库类型生成相应的分页语句
+func Paginate(page int, pageSize int, querySQL string, args ...interface{}) (*Page[Record], error) {
+	db, err := defaultDB()
+	if err != nil {
+		return nil, err
+	}
+	return db.Paginate(page, pageSize, querySQL, args...)
 }
 
 func Transaction(fn func(*Tx) error) error {
@@ -571,7 +581,7 @@ func (db *DB) Exists(table string, whereSql string, whereArgs ...interface{}) (b
 	return db.dbMgr.exists(db.dbMgr.getDB(), table, whereSql, whereArgs...)
 }
 
-func (db *DB) Paginate(page int, pageSize int, selectSql string, table string, whereSql string, orderBySql string, args ...interface{}) (*Page[Record], error) {
+func (db *DB) PaginateBuilder(page int, pageSize int, selectSql string, table string, whereSql string, orderBySql string, args ...interface{}) (*Page[Record], error) {
 	if db.lastErr != nil {
 		return nil, db.lastErr
 	}
@@ -597,6 +607,37 @@ func (db *DB) Paginate(page int, pageSize int, selectSql string, table string, w
 
 	if db.cacheName != "" {
 		key := GenerateCacheKey(db.dbMgr.name, "PAGINATE:"+querySQL, args...)
+		if val, ok := GetCache().CacheGet(db.cacheName, key); ok {
+			var pageObj *Page[Record]
+			if convertCacheValue(val, &pageObj) {
+				return pageObj, nil
+			}
+		}
+		list, totalRow, err := db.dbMgr.paginate(db.dbMgr.getDB(), querySQL, page, pageSize, args...)
+		if err == nil {
+			pageObj := NewPage(list, page, pageSize, totalRow)
+			GetCache().CacheSet(db.cacheName, key, pageObj, getEffectiveTTL(db.cacheName, db.cacheTTL))
+			return pageObj, nil
+		}
+		return nil, err
+	}
+
+	list, totalRow, err := db.dbMgr.paginate(db.dbMgr.getDB(), querySQL, page, pageSize, args...)
+	if err != nil {
+		return nil, err
+	}
+	return NewPage(list, page, pageSize, totalRow), nil
+}
+
+// Paginate DB实例分页方法，使用完整SQL语句进行分页查询
+// 自动解析SQL并根据数据库类型生成相应的分页语句，支持缓存集成
+func (db *DB) Paginate(page int, pageSize int, querySQL string, args ...interface{}) (*Page[Record], error) {
+	if db.lastErr != nil {
+		return nil, db.lastErr
+	}
+
+	if db.cacheName != "" {
+		key := GenerateCacheKey(db.dbMgr.name, "PAGINATE_SQL:"+querySQL, args...)
 		if val, ok := GetCache().CacheGet(db.cacheName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
@@ -955,7 +996,7 @@ func (tx *Tx) Exists(table string, whereSql string, whereArgs ...interface{}) (b
 	return tx.dbMgr.exists(tx.tx, table, whereSql, whereArgs...)
 }
 
-func (tx *Tx) Paginate(page int, pageSize int, selectSql string, table string, whereSql string, orderBySql string, args ...interface{}) (*Page[Record], error) {
+func (tx *Tx) PaginateBuilder(page int, pageSize int, selectSql string, table string, whereSql string, orderBySql string, args ...interface{}) (*Page[Record], error) {
 	if table != "" {
 		if err := ValidateTableName(table); err != nil {
 			return nil, err
@@ -978,6 +1019,33 @@ func (tx *Tx) Paginate(page int, pageSize int, selectSql string, table string, w
 
 	if tx.cacheName != "" {
 		key := GenerateCacheKey(tx.dbMgr.name, "PAGINATE:"+querySQL, args...)
+		if val, ok := GetCache().CacheGet(tx.cacheName, key); ok {
+			var pageObj *Page[Record]
+			if convertCacheValue(val, &pageObj) {
+				return pageObj, nil
+			}
+		}
+		list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, args...)
+		if err == nil {
+			pageObj := NewPage(list, page, pageSize, totalRow)
+			GetCache().CacheSet(tx.cacheName, key, pageObj, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
+			return pageObj, nil
+		}
+		return nil, err
+	}
+
+	list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, args...)
+	if err != nil {
+		return nil, err
+	}
+	return NewPage(list, page, pageSize, totalRow), nil
+}
+
+// Paginate 事务分页方法，使用完整SQL语句进行分页查询
+// 在事务上下文中自动解析SQL并根据数据库类型生成相应的分页语句
+func (tx *Tx) Paginate(page int, pageSize int, querySQL string, args ...interface{}) (*Page[Record], error) {
+	if tx.cacheName != "" {
+		key := GenerateCacheKey(tx.dbMgr.name, "PAGINATE_SQL:"+querySQL, args...)
 		if val, ok := GetCache().CacheGet(tx.cacheName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {

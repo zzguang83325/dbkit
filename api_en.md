@@ -171,10 +171,17 @@ Query all records in the table.
 
 ### Paginate
 ```go
-func Paginate(page, pageSize int, selectSql, table, whereSql, orderBySql string, args ...interface{}) (*Page[Record], error)
-func (db *DB) Paginate(page, pageSize int, selectSql, table, whereSql, orderBySql string, args ...interface{}) (*Page[Record], error)
+func Paginate(page, pageSize int, querySQL string, args ...interface{}) (*Page[Record], error)
+func (db *DB) Paginate(page, pageSize int, querySQL string, args ...interface{}) (*Page[Record], error)
 ```
-Pagination query.
+Pagination query (recommended). Uses complete SQL statement for pagination, automatically parses SQL and generates appropriate pagination statements based on database type.
+
+### PaginateBuilder
+```go
+func PaginateBuilder(page, pageSize int, selectSql, table, whereSql, orderBySql string, args ...interface{}) (*Page[Record], error)
+func (db *DB) PaginateBuilder(page, pageSize int, selectSql, table, whereSql, orderBySql string, args ...interface{}) (*Page[Record], error)
+```
+Traditional builder-style pagination query. Performs pagination by separately specifying SELECT, table name, WHERE and ORDER BY clauses.
 
 **Parameters:**
 - `page`: Page number (starts from 1)

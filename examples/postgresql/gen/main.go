@@ -9,7 +9,7 @@ import (
 
 func main() {
 	// 1. 连接 PostgreSQL 数据库
-	dsn := "user=test password=123456 host=192.168.10.220 port=5432 dbname=postgres sslmode=disable"
+	dsn := "user=postgres password=123456 host=127.0.0.1 port=5432 dbname=postgres sslmode=disable"
 	err := dbkit.OpenDatabaseWithDBName("postgresql", dbkit.PostgreSQL, dsn, 25)
 	if err != nil {
 		log.Fatalf("PostgreSQL数据库连接失败: %v", err)

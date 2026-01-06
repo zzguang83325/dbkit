@@ -529,6 +529,49 @@ func (qb *QueryBuilder) buildSelectSql() (string, []interface{}) {
 	return sb.String(), allArgs
 }
 
+// removeLimitOffset 移除SQL语句中的LIMIT和OFFSET子句
+// 因为Paginate会自动处理分页逻辑
+func removeLimitOffset(sql string) string {
+	// 使用正则表达式移除LIMIT和OFFSET子句
+	// 这里使用简单的字符串处理，因为buildSelectSql生成的SQL格式是可预测的
+
+	// 移除 LIMIT 子句
+	if idx := strings.LastIndex(strings.ToUpper(sql), " LIMIT "); idx != -1 {
+		// 找到LIMIT后面的数字结束位置
+		remaining := sql[idx+7:] // 跳过" LIMIT "
+		var endIdx int
+		for i, r := range remaining {
+			if r < '0' || r > '9' {
+				endIdx = i
+				break
+			}
+		}
+		if endIdx == 0 {
+			endIdx = len(remaining)
+		}
+		sql = sql[:idx] + remaining[endIdx:]
+	}
+
+	// 移除 OFFSET 子句
+	if idx := strings.LastIndex(strings.ToUpper(sql), " OFFSET "); idx != -1 {
+		// 找到OFFSET后面的数字结束位置
+		remaining := sql[idx+8:] // 跳过" OFFSET "
+		var endIdx int
+		for i, r := range remaining {
+			if r < '0' || r > '9' {
+				endIdx = i
+				break
+			}
+		}
+		if endIdx == 0 {
+			endIdx = len(remaining)
+		}
+		sql = sql[:idx] + remaining[endIdx:]
+	}
+
+	return strings.TrimSpace(sql)
+}
+
 // getSoftDeleteCondition returns the soft delete filter condition
 func (qb *QueryBuilder) getSoftDeleteCondition() string {
 	var mgr *dbManager
@@ -687,24 +730,14 @@ func (qb *QueryBuilder) Paginate(pageNumber, pageSize int) (*Page[Record], error
 		return nil, qb.lastErr
 	}
 
-	// Collect all where conditions including soft delete filter
-	whereClauses := make([]string, 0, len(qb.whereSql)+1)
-	whereClauses = append(whereClauses, qb.whereSql...)
+	// 构建完整的SQL语句（不包含LIMIT和OFFSET，因为分页逻辑会处理）
+	sql, args := qb.buildSelectSql()
 
-	// Add soft delete filter if applicable
-	softDeleteCondition := qb.getSoftDeleteCondition()
-	if softDeleteCondition != "" {
-		whereClauses = append(whereClauses, softDeleteCondition)
-	}
+	// 移除LIMIT和OFFSET子句，因为Paginate会处理分页
+	sql = removeLimitOffset(sql)
 
-	whereSql := ""
-	if len(whereClauses) > 0 {
-		whereSql = strings.Join(whereClauses, " AND ")
-	}
-
-	// Handle caching
+	// 处理缓存
 	if qb.cacheName != "" && qb.tx == nil {
-		sql, args := qb.buildSelectSql()
 		cacheKey := qb.generateCacheKey(sql, args) + fmt.Sprintf("_p%d_s%d", pageNumber, pageSize)
 		if val, ok := CacheGet(qb.cacheName, cacheKey); ok {
 			var pageObj *Page[Record]
@@ -713,18 +746,26 @@ func (qb *QueryBuilder) Paginate(pageNumber, pageSize int) (*Page[Record], error
 			}
 		}
 
-		// If not in cache, query and store
-		pageObj, err := qb.db.Paginate(pageNumber, pageSize, qb.selectSql, qb.table, whereSql, qb.orderBy, qb.whereArgs...)
+		// 使用新的Paginate实现
+		var pageObj *Page[Record]
+		var err error
+		if qb.tx != nil {
+			pageObj, err = qb.tx.Paginate(pageNumber, pageSize, sql, args...)
+		} else {
+			pageObj, err = qb.db.Paginate(pageNumber, pageSize, sql, args...)
+		}
+
 		if err == nil {
 			CacheSet(qb.cacheName, cacheKey, pageObj, qb.cacheTTL)
 		}
 		return pageObj, err
 	}
 
+	// 直接使用新的Paginate实现
 	if qb.tx != nil {
-		return qb.tx.Paginate(pageNumber, pageSize, qb.selectSql, qb.table, whereSql, qb.orderBy, qb.whereArgs...)
+		return qb.tx.Paginate(pageNumber, pageSize, sql, args...)
 	}
-	return qb.db.Paginate(pageNumber, pageSize, qb.selectSql, qb.table, whereSql, qb.orderBy, qb.whereArgs...)
+	return qb.db.Paginate(pageNumber, pageSize, sql, args...)
 }
 
 // Update executes an update query with the criteria in the builder

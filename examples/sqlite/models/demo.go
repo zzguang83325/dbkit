@@ -59,6 +59,16 @@ func (m *Demo) Delete() (int64, error) {
 	return dbkit.DeleteDbModel(m)
 }
 
+// ForceDelete performs a physical delete, bypassing soft delete
+func (m *Demo) ForceDelete() (int64, error) {
+	return dbkit.ForceDeleteModel(m)
+}
+
+// Restore restores a soft-deleted record
+func (m *Demo) Restore() (int64, error) {
+	return dbkit.RestoreModel(m)
+}
+
 // FindFirst finds the first Demo record based on conditions
 func (m *Demo) FindFirst(whereSql string, args ...interface{}) (*Demo, error) {
 	result := &Demo{}
@@ -70,7 +80,24 @@ func (m *Demo) Find(whereSql string, orderBySql string, args ...interface{}) ([]
 	return dbkit.FindModel[*Demo](m, m.GetCache(), whereSql, orderBySql, args...)
 }
 
-// Paginate paginates Demo records based on conditions
-func (m *Demo) Paginate(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*Demo], error) {
+// FindWithTrashed finds Demo records including soft-deleted ones
+func (m *Demo) FindWithTrashed(whereSql string, orderBySql string, args ...interface{}) ([]*Demo, error) {
+	return dbkit.FindModelWithTrashed[*Demo](m, m.GetCache(), whereSql, orderBySql, args...)
+}
+
+// FindOnlyTrashed finds only soft-deleted Demo records
+func (m *Demo) FindOnlyTrashed(whereSql string, orderBySql string, args ...interface{}) ([]*Demo, error) {
+	return dbkit.FindModelOnlyTrashed[*Demo](m, m.GetCache(), whereSql, orderBySql, args...)
+}
+
+// PaginateBuilder paginates Demo records based on conditions (traditional method)
+func (m *Demo) PaginateBuilder(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*Demo], error) {
 	return dbkit.PaginateModel[*Demo](m, m.GetCache(), page, pageSize, whereSql, orderBy, args...)
 }
+
+// Paginate paginates Demo records using complete SQL statement (recommended)
+// 使用完整SQL语句进行分页查询，自动解析SQL并根据数据库类型生成相应的分页语句
+func (m *Demo) Paginate(page int, pageSize int, querySQL string, args ...interface{}) (*dbkit.Page[*Demo], error) {
+	return dbkit.PaginateModel_FullSql[*Demo](m, m.GetCache(), page, pageSize, querySQL, args...)
+}
+

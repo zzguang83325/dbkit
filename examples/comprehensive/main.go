@@ -597,7 +597,7 @@ func testPagination() {
 
 	// Native pagination - Use raw SQL pagination
 	// 原生分页 - 使用原始 SQL 分页
-	page3, err := dbkit.Paginate(1, 10, "id, username, age", "users", "age > ?", "id ASC", 20)
+	page3, err := dbkit.Paginate(1, 10, "select id, username, age from users where age > ? order by id ASC", 20)
 	if err != nil {
 		log.Printf("  Native pagination failed: %v", err)
 	} else {
@@ -1490,7 +1490,7 @@ func testDbModel() {
 
 	// Pagination using Model
 	// 使用 Model 分页
-	page, err := userModel.Paginate(1, 5, "status = ?", "id DESC", "active")
+	page, err := userModel.PaginateBuilder(1, 5, "status = ?", "id DESC", "active")
 	if err != nil {
 		log.Printf("  Model Paginate failed: %v", err)
 	} else {

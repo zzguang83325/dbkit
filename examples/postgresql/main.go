@@ -150,7 +150,7 @@ func demoDbModelOperations() {
 	}
 
 	// 5. Paginate
-	page, err := model.Paginate(1, 10, "age > ?", "id ASC", 18)
+	page, err := model.Paginate(1, 10, "select * from demo where age > ? order by id ASC", 18)
 	if err != nil {
 		log.Printf("Paginate 失败: %v", err)
 	} else {

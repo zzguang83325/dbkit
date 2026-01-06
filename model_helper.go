@@ -70,6 +70,18 @@ func PaginateModel[T IDbModel](model T, cache *ModelCache, page, pageSize int, w
 	return RecordPageToDbModelPage[T](recordsPage)
 }
 
+func PaginateModel_FullSql[T IDbModel](model T, cache *ModelCache, page, pageSize int, querySQL string, whereArgs ...interface{}) (*Page[T], error) {
+	db := Use(model.DatabaseName())
+	if cache != nil && cache.CacheName != "" {
+		db = db.Cache(cache.CacheName, cache.CacheTTL)
+	}
+	recordsPage, err := db.Paginate(page, pageSize, querySQL, whereArgs...)
+	if err != nil {
+		return nil, err
+	}
+	return RecordPageToDbModelPage[T](recordsPage)
+}
+
 // --- Soft Delete Model Helpers ---
 
 // ForceDeleteModel performs a physical delete on a soft-delete enabled model

@@ -187,11 +187,14 @@ func main() {
     // Pagination
     page := 1
     perPage := 10
-    dataPage, err := dbkit.Paginate(page, perPage, "SELECT *", "users", "status=?", "id ASC", 1)
+    pageObj, err := dbkit.Paginate(page, perPage, "SELECT * from users where status=?", "id ASC", 1)
     if err != nil {
         log.Printf("Pagination failed: %v", err)
     } else {
-        fmt.Printf("Page %d (per page %d), total: %d\n", page, perPage, dataPage.TotalRow)
+        fmt.Printf("Page %d of %d (per page %d), total: %d\n", pageObj.PageNumber, pageObj.TotalPage, pageObj.PageSize, pageObj.TotalRow)
+        for i, user := range pageObj.List {
+            fmt.Printf("  %d. %s (ID: %d)\n", i+1, user.GetString("name"), user.GetInt("id"))
+        }
     }
 }
 ```
@@ -226,7 +229,7 @@ for _, u := range users {
 }
 
 // Pagination
-pageObj, err := foundUser.Paginate(1, 10, "id > ?", "id desc", 1)
+pageObj, err := foundUser.Paginate(1, 10, "select * from users where id > ?", 1)
 if err != nil {
     return
 }

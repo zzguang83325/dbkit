@@ -87,7 +87,14 @@ func (m *Order) FindOnlyTrashed(whereSql string, orderBySql string, args ...inte
 	return dbkit.FindModelOnlyTrashed[*Order](m, m.GetCache(), whereSql, orderBySql, args...)
 }
 
-// Paginate paginates Order records based on conditions
-func (m *Order) Paginate(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*Order], error) {
+// PaginateBuilder paginates Order records based on conditions (traditional method)
+func (m *Order) PaginateBuilder(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*Order], error) {
 	return dbkit.PaginateModel[*Order](m, m.GetCache(), page, pageSize, whereSql, orderBy, args...)
 }
+
+// Paginate paginates Order records using complete SQL statement (recommended)
+// 使用完整SQL语句进行分页查询，自动解析SQL并根据数据库类型生成相应的分页语句
+func (m *Order) Paginate(page int, pageSize int, fullSQL string, args ...interface{}) (*dbkit.Page[*Order], error) {
+	return dbkit.PaginateModel_FullSql[*Order](m, m.GetCache(), page, pageSize, fullSQL, args...)
+}
+

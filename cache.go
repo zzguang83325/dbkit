@@ -306,6 +306,138 @@ func GenerateCacheKey(dbName, sql string, args ...interface{}) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
+// GeneratePaginationCacheKey 为分页查询生成专门的缓存键
+// 基于解析后的SQL结构生成更精确的缓存键，确保缓存键的唯一性和一致性
+func GeneratePaginationCacheKey(dbName string, parsedSQL *ParsedSQL, page, pageSize int, args ...interface{}) string {
+	hash := md5.New()
+
+	// 数据库名称
+	hash.Write([]byte(dbName))
+	hash.Write([]byte(":"))
+
+	// 分页标识
+	hash.Write([]byte("PAGINATE"))
+	hash.Write([]byte(":"))
+
+	// 页码和页面大小
+	hash.Write([]byte(fmt.Sprintf("p%d_s%d", page, pageSize)))
+	hash.Write([]byte(":"))
+
+	// SQL各个部分的哈希，确保结构化的一致性
+	if parsedSQL.SelectClause != "" {
+		hash.Write([]byte("SELECT:"))
+		hash.Write([]byte(parsedSQL.SelectClause))
+		hash.Write([]byte(":"))
+	}
+
+	if parsedSQL.FromClause != "" {
+		hash.Write([]byte("FROM:"))
+		hash.Write([]byte(parsedSQL.FromClause))
+		hash.Write([]byte(":"))
+	}
+
+	if parsedSQL.WhereClause != "" {
+		hash.Write([]byte("WHERE:"))
+		hash.Write([]byte(parsedSQL.WhereClause))
+		hash.Write([]byte(":"))
+	}
+
+	if parsedSQL.GroupByClause != "" {
+		hash.Write([]byte("GROUP:"))
+		hash.Write([]byte(parsedSQL.GroupByClause))
+		hash.Write([]byte(":"))
+	}
+
+	if parsedSQL.HavingClause != "" {
+		hash.Write([]byte("HAVING:"))
+		hash.Write([]byte(parsedSQL.HavingClause))
+		hash.Write([]byte(":"))
+	}
+
+	if parsedSQL.OrderByClause != "" {
+		hash.Write([]byte("ORDER:"))
+		hash.Write([]byte(parsedSQL.OrderByClause))
+		hash.Write([]byte(":"))
+	}
+
+	// 复杂查询标识
+	if parsedSQL.IsComplex {
+		hash.Write([]byte("COMPLEX:"))
+	}
+	if parsedSQL.HasSubquery {
+		hash.Write([]byte("SUBQUERY:"))
+	}
+	if parsedSQL.HasJoin {
+		hash.Write([]byte("JOIN:"))
+	}
+
+	// 参数
+	if len(args) > 0 {
+		hash.Write([]byte("ARGS:"))
+		hash.Write([]byte(fmt.Sprintf("%v", args)))
+	}
+
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// GenerateCountCacheKey 为计数查询生成专门的缓存键
+// 基于解析后的SQL结构生成计数查询的缓存键
+func GenerateCountCacheKey(dbName string, parsedSQL *ParsedSQL, args ...interface{}) string {
+	hash := md5.New()
+
+	// 数据库名称
+	hash.Write([]byte(dbName))
+	hash.Write([]byte(":"))
+
+	// 计数标识
+	hash.Write([]byte("COUNT"))
+	hash.Write([]byte(":"))
+
+	// 只包含影响计数的SQL部分
+	if parsedSQL.FromClause != "" {
+		hash.Write([]byte("FROM:"))
+		hash.Write([]byte(parsedSQL.FromClause))
+		hash.Write([]byte(":"))
+	}
+
+	if parsedSQL.WhereClause != "" {
+		hash.Write([]byte("WHERE:"))
+		hash.Write([]byte(parsedSQL.WhereClause))
+		hash.Write([]byte(":"))
+	}
+
+	if parsedSQL.GroupByClause != "" {
+		hash.Write([]byte("GROUP:"))
+		hash.Write([]byte(parsedSQL.GroupByClause))
+		hash.Write([]byte(":"))
+	}
+
+	if parsedSQL.HavingClause != "" {
+		hash.Write([]byte("HAVING:"))
+		hash.Write([]byte(parsedSQL.HavingClause))
+		hash.Write([]byte(":"))
+	}
+
+	// 复杂查询标识（影响计数逻辑）
+	if parsedSQL.IsComplex {
+		hash.Write([]byte("COMPLEX:"))
+	}
+	if parsedSQL.HasSubquery {
+		hash.Write([]byte("SUBQUERY:"))
+	}
+	if parsedSQL.HasJoin {
+		hash.Write([]byte("JOIN:"))
+	}
+
+	// 参数
+	if len(args) > 0 {
+		hash.Write([]byte("ARGS:"))
+		hash.Write([]byte(fmt.Sprintf("%v", args)))
+	}
+
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
 func getEffectiveTTL(cacheName string, customTTL time.Duration) time.Duration {
 	if customTTL >= 0 {
 		return customTTL

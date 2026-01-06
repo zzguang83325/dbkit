@@ -71,7 +71,12 @@ func (m *Demo) Find(whereSql string, orderBySql string, args ...interface{}) ([]
 	return dbkit.FindModel[*Demo](m, m.GetCache(), whereSql, orderBySql, args...)
 }
 
-// Paginate paginates Demo records based on conditions
-func (m *Demo) Paginate(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*Demo], error) {
+func (m *Demo) PaginateBuilder(page int, pageSize int, whereSql string, orderBy string, args ...interface{}) (*dbkit.Page[*Demo], error) {
 	return dbkit.PaginateModel[*Demo](m, m.GetCache(), page, pageSize, whereSql, orderBy, args...)
+}
+
+// Paginate paginates Demo records using complete SQL statement (recommended)
+// 使用完整SQL语句进行分页查询，自动解析SQL并根据数据库类型生成相应的分页语句
+func (m *Demo) Paginate(page int, pageSize int, querySQL string, args ...interface{}) (*dbkit.Page[*Demo], error) {
+	return dbkit.PaginateModel_FullSql[*Demo](m, m.GetCache(), page, pageSize, querySQL, args...)
 }
