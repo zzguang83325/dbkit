@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"pagination_demo/models"
+
 	"github.com/zzguang83325/dbkit"
 )
 
@@ -16,7 +18,7 @@ func main() {
 	fmt.Println("=====================================")
 
 	// 测试 User 模型的基本功能
-	user := &User{
+	user := &models.User{
 		ID:        1,
 		Name:      "测试用户",
 		Email:     "test@example.com",
@@ -42,7 +44,7 @@ func main() {
 	}
 
 	// 测试 Page 结构体
-	testUsers := []*User{user}
+	testUsers := []*models.User{user}
 	page := dbkit.NewPage(testUsers, 1, 10, 1)
 
 	fmt.Printf("✅ Page 结构体测试成功\n")

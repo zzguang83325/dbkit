@@ -53,10 +53,10 @@ func main() {
 
 	// 分页查询
 	fmt.Printf("\n[3] 分页查询:\n")
-	page, _ := dbkit.Cache("user_cache").Paginate(1, 10, "select * from test_users", "test_users", "", "")
+	page, _ := dbkit.Cache("user_cache").Paginate(1, 10, "select * from test_users")
 	fmt.Printf("分页查询结果: %v\n", page.ToJson())
 
-	page2, _ := dbkit.Cache("user_cache").Paginate(1, 10, "*", "test_users", "", "")
+	page2, _ := dbkit.Cache("user_cache").Paginate(1, 10, "select * from test_users")
 	fmt.Printf("分页查询结果2: %v\n", page2.ToJson())
 
 	// 4. 基础的 CacheGet/Set 操作

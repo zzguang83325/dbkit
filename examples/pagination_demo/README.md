@@ -95,7 +95,7 @@ go mod tidy
 go run .
 
 # 或者明确指定文件
-go run main.go models.go
+go run main.go
 ```
 
 **注意**：不要只运行 `go run main.go`，因为这样会缺少 `models.go` 中的 `User` 类型定义，导致编译错误。

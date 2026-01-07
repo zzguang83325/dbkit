@@ -29,15 +29,15 @@ func main() {
 		fmt.Println("💡 请确保 MySQL 数据库正在运行并修改连接参数")
 		return
 	}
-
+	demonstrateInsert()
 	// 步骤 3: 基础查询操作
 	fmt.Println("\n【步骤 3: 基础查询】")
 	demonstrateBasicQuery()
-
+	fmt.Println("\n【步骤 4: 分页查询】")
 	demonstratePaginate() //分页查询
-	// 步骤 4: 插入操作
-	fmt.Println("\n【步骤 4: 插入数据】")
-	demonstrateInsert()
+
+
+
 
 	// 步骤 5: 更新操作
 	fmt.Println("\n【步骤 5: 更新数据】")

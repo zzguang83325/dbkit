@@ -173,18 +173,18 @@ func (mgr *SqlConfigManager) LoadConfig(configPath string) (*SqlConfig, error) {
 	// Check if already loaded
 	if config, exists := mgr.configs[configPath]; exists {
 		// Log config already loaded
-		LogDebug("SQL config already loaded", map[string]interface{}{
-			"configPath": configPath,
-			"namespace":  config.Namespace,
-			"sqlCount":   len(config.Sqls),
-		})
+		// LogDebug("SQL config already loaded", map[string]interface{}{
+		// 	"configPath": configPath,
+		// 	"namespace":  config.Namespace,
+		// 	"sqlCount":   len(config.Sqls),
+		// })
 		return config, nil
 	}
 
 	// Log config loading start
-	LogDebug("Loading SQL config file", map[string]interface{}{
-		"configPath": configPath,
-	})
+	// LogDebug("Loading SQL config file", map[string]interface{}{
+	// 	"configPath": configPath,
+	// })
 
 	// Read and parse the configuration file
 	data, err := os.ReadFile(configPath)
@@ -540,14 +540,14 @@ func (b *SqlTemplateBuilder) Query() ([]Record, error) {
 	}
 
 	// Log SQL execution in debug mode
-	LogDebug("Executing SQL template query", map[string]interface{}{
-		"sqlName":    b.sqlName,
-		"finalSQL":   finalSQL,
-		"paramCount": len(args),
-		"timeout":    b.timeout.String(),
-		"hasDB":      b.dbName != "",
-		"hasTx":      b.tx != nil,
-	})
+	// LogDebug("Executing SQL template query", map[string]interface{}{
+	// 	"sqlName":    b.sqlName,
+	// 	"finalSQL":   finalSQL,
+	// 	"paramCount": len(args),
+	// 	"timeout":    b.timeout.String(),
+	// 	"hasDB":      b.dbName != "",
+	// 	"hasTx":      b.tx != nil,
+	// })
 
 	if b.tx != nil {
 		// Execute in transaction context
@@ -582,14 +582,14 @@ func (b *SqlTemplateBuilder) Paginate(page int, pageSize int) (*Page[Record], er
 	}
 
 	// Log SQL execution in debug mode
-	LogDebug("Executing SQL template Paginate", map[string]interface{}{
-		"sqlName":    b.sqlName,
-		"finalSQL":   finalSQL,
-		"paramCount": len(args),
-		"timeout":    b.timeout.String(),
-		"hasDB":      b.dbName != "",
-		"hasTx":      b.tx != nil,
-	})
+	// LogDebug("Executing SQL template Paginate", map[string]interface{}{
+	// 	"sqlName":    b.sqlName,
+	// 	"finalSQL":   finalSQL,
+	// 	"paramCount": len(args),
+	// 	"timeout":    b.timeout.String(),
+	// 	"hasDB":      b.dbName != "",
+	// 	"hasTx":      b.tx != nil,
+	// })
 
 	if b.tx != nil {
 		// Execute in transaction context
@@ -624,14 +624,14 @@ func (b *SqlTemplateBuilder) QueryFirst() (*Record, error) {
 	}
 
 	// Log SQL execution in debug mode
-	LogDebug("Executing SQL template query first", map[string]interface{}{
-		"sqlName":    b.sqlName,
-		"finalSQL":   finalSQL,
-		"paramCount": len(args),
-		"timeout":    b.timeout.String(),
-		"hasDB":      b.dbName != "",
-		"hasTx":      b.tx != nil,
-	})
+	// LogDebug("Executing SQL template query first", map[string]interface{}{
+	// 	"sqlName":    b.sqlName,
+	// 	"finalSQL":   finalSQL,
+	// 	"paramCount": len(args),
+	// 	"timeout":    b.timeout.String(),
+	// 	"hasDB":      b.dbName != "",
+	// 	"hasTx":      b.tx != nil,
+	// })
 
 	if b.tx != nil {
 		// Execute in transaction context
@@ -666,14 +666,14 @@ func (b *SqlTemplateBuilder) Exec() (sql.Result, error) {
 	}
 
 	// Log SQL execution in debug mode
-	LogDebug("Executing SQL template exec", map[string]interface{}{
-		"sqlName":    b.sqlName,
-		"finalSQL":   finalSQL,
-		"paramCount": len(args),
-		"timeout":    b.timeout.String(),
-		"hasDB":      b.dbName != "",
-		"hasTx":      b.tx != nil,
-	})
+	// LogDebug("Executing SQL template exec", map[string]interface{}{
+	// 	"sqlName":    b.sqlName,
+	// 	"finalSQL":   finalSQL,
+	// 	"paramCount": len(args),
+	// 	"timeout":    b.timeout.String(),
+	// 	"hasDB":      b.dbName != "",
+	// 	"hasTx":      b.tx != nil,
+	// })
 
 	if b.tx != nil {
 		// Execute in transaction context
@@ -782,14 +782,14 @@ func (engine *SqlTemplateEngine) ProcessTemplate(sqlItem *SqlItem, params interf
 	}
 
 	// Log successful SQL template processing in debug mode
-	LogDebug("SQL template processed successfully", map[string]interface{}{
-		"sqlName":      sqlItem.Name,
-		"originalSQL":  sqlItem.SQL,
-		"processedSQL": processedSQL,
-		"paramCount":   len(args),
-		"hasInParam":   len(sqlItem.InParam) > 0,
-		"hasOrderBy":   sqlItem.Order != "",
-	})
+	// LogDebug("SQL template processed successfully", map[string]interface{}{
+	// 	"sqlName":      sqlItem.Name,
+	// 	"originalSQL":  sqlItem.SQL,
+	// 	"processedSQL": processedSQL,
+	// 	"paramCount":   len(args),
+	// 	"hasInParam":   len(sqlItem.InParam) > 0,
+	// 	"hasOrderBy":   sqlItem.Order != "",
+	// })
 
 	return processedSQL, args, nil
 }

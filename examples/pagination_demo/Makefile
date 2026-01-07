@@ -12,11 +12,11 @@ help:
 
 test-basic:
 	@echo "🧪 运行基础功能测试..."
-	go run test_basic.go models.go
+	go run test_basic.go
 
 test-full:
 	@echo "🚀 运行完整功能演示..."
-	go run main.go models.go
+	go run main.go
 
 build:
 	@echo "🔨 编译示例程序..."

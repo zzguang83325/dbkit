@@ -18,7 +18,7 @@ examples/pagination_demo/
 ### 核心文件
 
 - **main.go**: 主演示程序，包含5个完整的分页功能演示
-- **models.go**: 包含 User 模型定义和所有分页相关方法
+- **models/models.go**: 包含 User 模型定义和所有分页相关方法
 - **test_basic.go**: 基础功能测试，不需要数据库连接
 
 ### 配置文件
