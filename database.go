@@ -2457,24 +2457,47 @@ func (mgr *dbManager) convertPlaceholderWithOffset(querySQL string, driver Drive
 	var builder strings.Builder
 	builder.Grow(len(querySQL) + 10)
 	paramIndex := 1 + offset
-	inString := false
+	inSingleQuote := false
+	inDoubleQuote := false
+	inBacktick := false
 
 	for i := 0; i < len(querySQL); i++ {
 		char := querySQL[i]
-		// Handle string literals to avoid replacing question marks inside them
-		if char == '\'' {
-			if i+1 < len(querySQL) && querySQL[i+1] == '\'' { // Handle escaped single quote ''
+
+		// Handle escaping (mostly for single quotes but good practice)
+		if i+1 < len(querySQL) && char == '\\' {
+			builder.WriteByte(char)
+			builder.WriteByte(querySQL[i+1])
+			i++
+			continue
+		}
+
+		// Handle string literals and identifiers
+		if char == '\'' && !inDoubleQuote && !inBacktick {
+			if i+1 < len(querySQL) && querySQL[i+1] == '\'' {
 				builder.WriteByte('\'')
 				builder.WriteByte('\'')
 				i++
 				continue
 			}
-			inString = !inString
+			inSingleQuote = !inSingleQuote
 			builder.WriteByte('\'')
 			continue
 		}
 
-		if char == '?' && !inString {
+		if char == '"' && !inSingleQuote && !inBacktick {
+			inDoubleQuote = !inDoubleQuote
+			builder.WriteByte('"')
+			continue
+		}
+
+		if char == '`' && !inSingleQuote && !inDoubleQuote {
+			inBacktick = !inBacktick
+			builder.WriteByte('`')
+			continue
+		}
+
+		if char == '?' && !inSingleQuote && !inDoubleQuote && !inBacktick {
 			switch driver {
 			case PostgreSQL:
 				builder.WriteString(fmt.Sprintf("$%d", paramIndex))
