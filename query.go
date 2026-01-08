@@ -375,6 +375,15 @@ func (db *DB) Timeout(d time.Duration) *DB {
 	return db
 }
 
+// WithCountCache 启用分页计数缓存
+// 用于在分页查询时缓存 COUNT 查询结果，避免重复执行 COUNT 语句
+// ttl: 缓存时间，如果为 0 则不缓存，如果大于 0 则缓存指定时间
+// 示例: dbkit.Cache("user_cache").WithCountCache(5*time.Minute).Paginate(1, 10, sql, args...)
+func (db *DB) WithCountCache(ttl time.Duration) *DB {
+	db.countCacheTTL = ttl
+	return db
+}
+
 func (db *DB) Query(querySQL string, args ...interface{}) ([]Record, error) {
 	if db.lastErr != nil {
 		return nil, db.lastErr
@@ -737,14 +746,15 @@ func (db *DB) PaginateBuilder(page int, pageSize int, selectSql string, table st
 
 	if db.cacheRepositoryName != "" {
 		cache := db.getEffectiveCache()
-		key := GenerateCacheKey(db.dbMgr.name, "PAGINATE:"+querySQL, args...)
+		// 缓存键包含 page 和 pageSize，确保不同页码使用不同的缓存
+		key := GenerateCacheKey(db.dbMgr.name, fmt.Sprintf("PAGINATE:p%d_s%d:%s", page, pageSize, querySQL), args...)
 		if val, ok := cache.CacheGet(db.cacheRepositoryName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
 			}
 		}
-		list, totalRow, err := db.dbMgr.paginate(sdb, querySQL, page, pageSize, args...)
+		list, totalRow, err := db.dbMgr.paginate(sdb, querySQL, page, pageSize, db.countCacheTTL, args...)
 		if err == nil {
 			pageObj := NewPage(list, page, pageSize, totalRow)
 			cache.CacheSet(db.cacheRepositoryName, key, pageObj, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
@@ -753,7 +763,7 @@ func (db *DB) PaginateBuilder(page int, pageSize int, selectSql string, table st
 		return nil, err
 	}
 
-	list, totalRow, err := db.dbMgr.paginate(sdb, querySQL, page, pageSize, args...)
+	list, totalRow, err := db.dbMgr.paginate(sdb, querySQL, page, pageSize, db.countCacheTTL, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -772,14 +782,15 @@ func (db *DB) Paginate(page int, pageSize int, querySQL string, args ...interfac
 	}
 	if db.cacheRepositoryName != "" {
 		cache := db.getEffectiveCache()
-		key := GenerateCacheKey(db.dbMgr.name, "PAGINATE_SQL:"+querySQL, args...)
+		// 缓存键包含 page 和 pageSize，确保不同页码使用不同的缓存
+		key := GenerateCacheKey(db.dbMgr.name, fmt.Sprintf("PAGINATE_SQL:p%d_s%d:%s", page, pageSize, querySQL), args...)
 		if val, ok := cache.CacheGet(db.cacheRepositoryName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
 			}
 		}
-		list, totalRow, err := db.dbMgr.paginate(sdb, querySQL, page, pageSize, args...)
+		list, totalRow, err := db.dbMgr.paginate(sdb, querySQL, page, pageSize, db.countCacheTTL, args...)
 		if err == nil {
 			pageObj := NewPage(list, page, pageSize, totalRow)
 			cache.CacheSet(db.cacheRepositoryName, key, pageObj, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
@@ -788,7 +799,7 @@ func (db *DB) Paginate(page int, pageSize int, querySQL string, args ...interfac
 		return nil, err
 	}
 
-	list, totalRow, err := db.dbMgr.paginate(sdb, querySQL, page, pageSize, args...)
+	list, totalRow, err := db.dbMgr.paginate(sdb, querySQL, page, pageSize, db.countCacheTTL, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -975,6 +986,15 @@ func (tx *Tx) RedisCache(cacheRepositoryName string, ttl ...time.Duration) *Tx {
 // Timeout sets the query timeout for this transaction
 func (tx *Tx) Timeout(d time.Duration) *Tx {
 	tx.timeout = d
+	return tx
+}
+
+// WithCountCache 启用分页计数缓存
+// 用于在分页查询时缓存 COUNT 查询结果，避免重复执行 COUNT 语句
+// ttl: 缓存时间，如果为 0 则不缓存，如果大于 0 则缓存指定时间
+// 示例: tx.Cache("user_cache").WithCountCache(5*time.Minute).Paginate(1, 10, sql, args...)
+func (tx *Tx) WithCountCache(ttl time.Duration) *Tx {
+	tx.countCacheTTL = ttl
 	return tx
 }
 
@@ -1205,14 +1225,15 @@ func (tx *Tx) PaginateBuilder(page int, pageSize int, selectSql string, table st
 
 	if tx.cacheRepositoryName != "" {
 		cache := tx.getEffectiveCache()
-		key := GenerateCacheKey(tx.dbMgr.name, "PAGINATE:"+querySQL, args...)
+		// 缓存键包含 page 和 pageSize，确保不同页码使用不同的缓存
+		key := GenerateCacheKey(tx.dbMgr.name, fmt.Sprintf("PAGINATE:p%d_s%d:%s", page, pageSize, querySQL), args...)
 		if val, ok := cache.CacheGet(tx.cacheRepositoryName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
 			}
 		}
-		list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, args...)
+		list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, tx.countCacheTTL, args...)
 		if err == nil {
 			pageObj := NewPage(list, page, pageSize, totalRow)
 			cache.CacheSet(tx.cacheRepositoryName, key, pageObj, getEffectiveTTL(tx.cacheRepositoryName, tx.cacheTTL))
@@ -1221,7 +1242,7 @@ func (tx *Tx) PaginateBuilder(page int, pageSize int, selectSql string, table st
 		return nil, err
 	}
 
-	list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, args...)
+	list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, tx.countCacheTTL, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1233,14 +1254,15 @@ func (tx *Tx) PaginateBuilder(page int, pageSize int, selectSql string, table st
 func (tx *Tx) Paginate(page int, pageSize int, querySQL string, args ...interface{}) (*Page[Record], error) {
 	if tx.cacheRepositoryName != "" {
 		cache := tx.getEffectiveCache()
-		key := GenerateCacheKey(tx.dbMgr.name, "PAGINATE_SQL:"+querySQL, args...)
+		// 缓存键包含 page 和 pageSize，确保不同页码使用不同的缓存
+		key := GenerateCacheKey(tx.dbMgr.name, fmt.Sprintf("PAGINATE_SQL:p%d_s%d:%s", page, pageSize, querySQL), args...)
 		if val, ok := cache.CacheGet(tx.cacheRepositoryName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
 			}
 		}
-		list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, args...)
+		list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, tx.countCacheTTL, args...)
 		if err == nil {
 			pageObj := NewPage(list, page, pageSize, totalRow)
 			cache.CacheSet(tx.cacheRepositoryName, key, pageObj, getEffectiveTTL(tx.cacheRepositoryName, tx.cacheTTL))
@@ -1249,7 +1271,7 @@ func (tx *Tx) Paginate(page int, pageSize int, querySQL string, args ...interfac
 		return nil, err
 	}
 
-	list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, args...)
+	list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, tx.countCacheTTL, args...)
 	if err != nil {
 		return nil, err
 	}

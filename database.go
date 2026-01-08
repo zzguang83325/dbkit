@@ -81,6 +81,7 @@ type DB struct {
 	cacheTTL            time.Duration
 	timeout             time.Duration // Query timeout for this instance
 	cacheProvider       CacheProvider // 指定的缓存提供者（nil 表示使用默认缓存）
+	countCacheTTL       time.Duration // 分页计数缓存时间（-1 表示不使用，0 表示不缓存，>0 表示使用指定时间）
 }
 
 // GetConfig returns the database configuration
@@ -128,6 +129,7 @@ type Tx struct {
 	cacheTTL            time.Duration
 	timeout             time.Duration // Query timeout for this transaction
 	cacheProvider       CacheProvider // 指定的缓存提供者（nil 表示使用默认缓存）
+	countCacheTTL       time.Duration // 分页计数缓存时间（-1 表示不使用，0 表示不缓存，>0 表示使用指定时间）
 }
 
 // getEffectiveCache 获取当前有效的缓存提供者
@@ -2076,7 +2078,7 @@ func (mgr *dbManager) batchDeleteByIds(executor sqlExecutor, table string, ids [
 	return totalAffected, nil
 }
 
-func (mgr *dbManager) paginate(executor sqlExecutor, querySQL string, page, pageSize int, args ...interface{}) ([]Record, int64, error) {
+func (mgr *dbManager) paginate(executor sqlExecutor, querySQL string, page, pageSize int, countCacheTTL time.Duration, args ...interface{}) ([]Record, int64, error) {
 	if page < 1 {
 		page = DefaultPage
 	}
@@ -2113,11 +2115,38 @@ func (mgr *dbManager) paginate(executor sqlExecutor, querySQL string, page, page
 	args = mgr.sanitizeArgs(countSQL, args)
 
 	var total int64
-	startCount := time.Now()
-	err := executor.QueryRow(countSQL, args...).Scan(&total)
-	mgr.logTrace(startCount, countSQL, args, err)
-	if err != nil {
-		return nil, 0, err
+
+	// 检查是否启用了计数缓存（countCacheTTL > 0 表示启用）
+	if countCacheTTL > 0 {
+		// 生成计数缓存键
+		countCacheKey := GenerateCacheKey(mgr.name, "COUNT:"+countSQL, args...)
+		countCacheRepo := "__dbkit_count_cache__"
+
+		// 尝试从缓存获取计数
+		if cachedCount, ok := GetLocalCacheInstance().CacheGet(countCacheRepo, countCacheKey); ok {
+			if count, ok := cachedCount.(int64); ok {
+				total = count
+			}
+		} else {
+			// 缓存未命中，执行 COUNT 查询
+			startCount := time.Now()
+			err := executor.QueryRow(countSQL, args...).Scan(&total)
+			mgr.logTrace(startCount, countSQL, args, err)
+			if err != nil {
+				return nil, 0, err
+			}
+
+			// 将计数结果缓存
+			GetLocalCacheInstance().CacheSet(countCacheRepo, countCacheKey, total, countCacheTTL)
+		}
+	} else {
+		// 不使用缓存，直接执行 COUNT 查询
+		startCount := time.Now()
+		err := executor.QueryRow(countSQL, args...).Scan(&total)
+		mgr.logTrace(startCount, countSQL, args, err)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	offset := (page - 1) * pageSize
@@ -2282,7 +2311,12 @@ func scanRecords(rows *sql.Rows, driver DriverType) ([]Record, error) {
 
 	results := make([]Record, len(maps))
 	for i, m := range maps {
-		results[i] = Record{columns: m}
+		// 正确初始化 Record，包括 lowerKeyMap
+		record := NewRecord()
+		for key, value := range m {
+			record.Set(key, value)
+		}
+		results[i] = *record
 	}
 	return results, nil
 }

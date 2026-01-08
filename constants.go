@@ -1,7 +1,5 @@
 package dbkit
 
-import "time"
-
 // 批量操作相关常量
 const (
 	// DefaultBatchSize 默认批量操作大小
@@ -15,8 +13,8 @@ const (
 	StmtCacheRepository = "__dbkit_stmt_cache__"
 
 	// StmtCacheTTL 预编译语句缓存时间
-	// 默认30分钟，过期后会自动清理
-	StmtCacheTTL = 30 * time.Minute
+	// 设置为 0 表示永不过期，只在数据库关闭或语句失效时清理
+	StmtCacheTTL = 0
 )
 
 // 分页相关常量

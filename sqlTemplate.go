@@ -70,6 +70,7 @@ type SqlTemplateBuilder struct {
 	cacheRepositoryName string        // 缓存仓库名称
 	cacheTTL            time.Duration // 缓存过期时间
 	cacheProvider       CacheProvider // 指定的缓存提供者（nil 表示使用默认缓存）
+	countCacheTTL       time.Duration // 分页计数缓存时间
 }
 
 // SqlTemplateEngine handles SQL template processing and parameter substitution
@@ -591,6 +592,15 @@ func (b *SqlTemplateBuilder) RedisCache(cacheRepositoryName string, ttl ...time.
 	return b
 }
 
+// WithCountCache 启用分页计数缓存
+// 用于在分页查询时缓存 COUNT 查询结果，避免重复执行 COUNT 语句
+// ttl: 缓存时间，如果为 0 则不缓存，如果大于 0 则缓存指定时间
+// 示例: SqlTemplate("getUserList", params).Cache("user_cache").WithCountCache(5*time.Minute).Paginate(1, 10)
+func (b *SqlTemplateBuilder) WithCountCache(ttl time.Duration) *SqlTemplateBuilder {
+	b.countCacheTTL = ttl
+	return b
+}
+
 // getEffectiveCache 获取当前有效的缓存提供者
 func (b *SqlTemplateBuilder) getEffectiveCache() CacheProvider {
 	if b.cacheProvider != nil {
@@ -723,9 +733,17 @@ func (b *SqlTemplateBuilder) Paginate(page int, pageSize int) (*Page[Record], er
 		if b.tx != nil {
 			// 在事务中执行
 			if b.timeout > 0 {
-				pageObj, err = b.tx.Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
+				tx := b.tx.Timeout(b.timeout)
+				if b.countCacheTTL > 0 {
+					tx = tx.WithCountCache(b.countCacheTTL)
+				}
+				pageObj, err = tx.Paginate(page, pageSize, finalSQL, args...)
 			} else {
-				pageObj, err = b.tx.Paginate(page, pageSize, finalSQL, args...)
+				tx := b.tx
+				if b.countCacheTTL > 0 {
+					tx = tx.WithCountCache(b.countCacheTTL)
+				}
+				pageObj, err = tx.Paginate(page, pageSize, finalSQL, args...)
 			}
 		} else if b.dbName != "" {
 			// 在指定数据库上执行
@@ -734,17 +752,27 @@ func (b *SqlTemplateBuilder) Paginate(page int, pageSize int) (*Page[Record], er
 				return nil, db.lastErr
 			}
 			if b.timeout > 0 {
-				pageObj, err = db.Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
-			} else {
-				pageObj, err = db.Paginate(page, pageSize, finalSQL, args...)
+				db = db.Timeout(b.timeout)
 			}
+			if b.countCacheTTL > 0 {
+				db = db.WithCountCache(b.countCacheTTL)
+			}
+			pageObj, err = db.Paginate(page, pageSize, finalSQL, args...)
 		} else {
 			// 在默认数据库上执行
+			var db *DB
 			if b.timeout > 0 {
-				pageObj, err = Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
+				db = Timeout(b.timeout)
 			} else {
-				pageObj, err = Paginate(page, pageSize, finalSQL, args...)
+				db, err = defaultDB()
+				if err != nil {
+					return nil, err
+				}
 			}
+			if b.countCacheTTL > 0 {
+				db = db.WithCountCache(b.countCacheTTL)
+			}
+			pageObj, err = db.Paginate(page, pageSize, finalSQL, args...)
 		}
 
 		// 如果查询成功，写入缓存
@@ -758,9 +786,17 @@ func (b *SqlTemplateBuilder) Paginate(page int, pageSize int) (*Page[Record], er
 	if b.tx != nil {
 		// Execute in transaction context
 		if b.timeout > 0 {
-			return b.tx.Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
+			tx := b.tx.Timeout(b.timeout)
+			if b.countCacheTTL > 0 {
+				tx = tx.WithCountCache(b.countCacheTTL)
+			}
+			return tx.Paginate(page, pageSize, finalSQL, args...)
 		}
-		return b.tx.Paginate(page, pageSize, finalSQL, args...)
+		tx := b.tx
+		if b.countCacheTTL > 0 {
+			tx = tx.WithCountCache(b.countCacheTTL)
+		}
+		return tx.Paginate(page, pageSize, finalSQL, args...)
 	} else if b.dbName != "" {
 		// Execute on specific database
 		db := Use(b.dbName)
@@ -768,15 +804,28 @@ func (b *SqlTemplateBuilder) Paginate(page int, pageSize int) (*Page[Record], er
 			return nil, db.lastErr
 		}
 		if b.timeout > 0 {
-			return db.Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
+			db = db.Timeout(b.timeout)
+		}
+		if b.countCacheTTL > 0 {
+			db = db.WithCountCache(b.countCacheTTL)
 		}
 		return db.Paginate(page, pageSize, finalSQL, args...)
 	} else {
 		// Execute on default database
+		var db *DB
+		var err error
 		if b.timeout > 0 {
-			return Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
+			db = Timeout(b.timeout)
+		} else {
+			db, err = defaultDB()
+			if err != nil {
+				return nil, err
+			}
 		}
-		return Paginate(page, pageSize, finalSQL, args...)
+		if b.countCacheTTL > 0 {
+			db = db.WithCountCache(b.countCacheTTL)
+		}
+		return db.Paginate(page, pageSize, finalSQL, args...)
 	}
 }
 

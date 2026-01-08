@@ -271,6 +271,26 @@ users, err := dbkit.Table("users").
     Find()
 ```
 
+### QueryBuilder.WithCountCache
+```go
+func (qb *QueryBuilder) WithCountCache(ttl time.Duration) *QueryBuilder
+```
+启用分页计数缓存。用于在分页查询时缓存 COUNT 查询结果，避免重复执行 COUNT 语句。
+
+**参数:**
+- `ttl`: 缓存时间，如果为 0 则不缓存，如果大于 0 则缓存指定时间
+
+**示例:**
+```go
+// 启用计数缓存，缓存 5 分钟
+page, err := dbkit.Table("users").
+    Where("age > ?", 30).
+    OrderBy("id DESC").
+    Cache("user_cache").
+    WithCountCache(5 * time.Minute).
+    Paginate(1, 10)
+```
+
 ### 超时错误处理
 超时后返回 `context.DeadlineExceeded` 错误：
 ```go
@@ -1550,6 +1570,39 @@ func FindFirstModel[T IDbModel](model T, cache *ModelCache, whereSql string, whe
 func PaginateModel[T IDbModel](model T, cache *ModelCache, page, pageSize int, whereSql, orderBySql string, whereArgs ...interface{}) (*Page[T], error)
 ```
 
+#### ModelCache 结构体
+```go
+type ModelCache struct {
+    CacheRepositoryName string        // 缓存仓库名称
+    CacheTTL            time.Duration // 缓存过期时间
+    CountCacheTTL       time.Duration // 分页计数缓存时间
+}
+```
+
+**方法:**
+```go
+func (c *ModelCache) SetCache(cacheRepositoryName string, ttl ...time.Duration)  // 设置缓存配置
+func (c *ModelCache) WithCountCache(ttl time.Duration) *ModelCache               // 启用分页计数缓存
+func (c *ModelCache) GetCache() *ModelCache                                      // 获取缓存配置
+```
+
+**示例:**
+```go
+// 创建用户模型并使用链式调用设置缓存
+user := &User{}
+
+// 方式一：使用链式调用（推荐）
+page, err := user.Cache("user_cache", 5*time.Minute).
+    WithCountCache(5*time.Minute).
+    PaginateBuilder(1, 10, "age > ?", "name ASC", 18)
+
+// 方式二：使用 PaginateModel 函数
+// user.SetCache("user_cache", 5*time.Minute)
+// user.WithCountCache(5*time.Minute)
+// page, err := dbkit.PaginateModel(user, user.GetCache(), 1, 10, 
+//     "age > ?", "name ASC", 18)
+```
+
 ---
 
 ## 缓存操作
@@ -2374,6 +2427,24 @@ records, err := dbkit.SqlTemplate("user_service.findUsers", params).
     Timeout(30 * time.Second).Query()
 ```
 
+#### WithCountCache
+```go
+func (b *SqlTemplateBuilder) WithCountCache(ttl time.Duration) *SqlTemplateBuilder
+```
+启用分页计数缓存。用于在分页查询时缓存 COUNT 查询结果，避免重复执行 COUNT 语句。
+
+**参数:**
+- `ttl`: 缓存时间，如果为 0 则不缓存，如果大于 0 则缓存指定时间
+
+**示例:**
+```go
+// 启用计数缓存，缓存 5 分钟
+pageObj, err := dbkit.SqlTemplate("getUserList", params).
+    Cache("user_cache").
+    WithCountCache(5 * time.Minute).
+    Paginate(1, 10)
+```
+
 #### Query
 ```go
 func (b *SqlTemplateBuilder) Query() ([]Record, error)
@@ -2415,6 +2486,12 @@ pageObj, err := dbkit.SqlTemplate("user_service.findActiveUsers", 1).
 // 带参数的分页查询
 pageObj, err := dbkit.SqlTemplate("user_service.findByStatus", "active", 18).
     Paginate(2, 20)
+
+// 带计数缓存的分页查询
+pageObj, err := dbkit.SqlTemplate("getUserList", params).
+    Cache("user_cache").
+    WithCountCache(5 * time.Minute).
+    Paginate(1, 10)
 
 // 在指定数据库上执行分页
 pageObj, err := dbkit.Use("mysql").SqlTemplate("findUsers", params).

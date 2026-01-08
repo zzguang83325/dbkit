@@ -40,6 +40,7 @@ type QueryBuilder struct {
 	cacheTTL            time.Duration
 	cacheProvider       CacheProvider // 指定的缓存提供者（nil 表示使用默认缓存）
 	timeout             time.Duration
+	countCacheTTL       time.Duration // 分页计数缓存时间
 	lastErr             error
 	withTrashed         bool             // Include soft-deleted records
 	onlyTrashed         bool             // Only query soft-deleted records
@@ -458,6 +459,15 @@ func (qb *QueryBuilder) Timeout(d time.Duration) *QueryBuilder {
 	return qb
 }
 
+// WithCountCache 启用分页计数缓存
+// 用于在分页查询时缓存 COUNT 查询结果，避免重复执行 COUNT 语句
+// ttl: 缓存时间，如果为 0 则不缓存，如果大于 0 则缓存指定时间
+// 示例: Table("users").Cache("user_cache").WithCountCache(5*time.Minute).Paginate(1, 10)
+func (qb *QueryBuilder) WithCountCache(ttl time.Duration) *QueryBuilder {
+	qb.countCacheTTL = ttl
+	return qb
+}
+
 // getEffectiveCache 获取当前有效的缓存提供者
 // 优先级: QueryBuilder.cacheProvider > DB/Tx.cacheProvider > 全局默认缓存
 func (qb *QueryBuilder) getEffectiveCache() CacheProvider {
@@ -806,9 +816,23 @@ func (qb *QueryBuilder) Paginate(pageNumber, pageSize int) (*Page[Record], error
 		var pageObj *Page[Record]
 		var err error
 		if qb.tx != nil {
-			pageObj, err = qb.tx.Paginate(pageNumber, pageSize, sql, args...)
+			tx := qb.tx
+			if qb.timeout > 0 {
+				tx = tx.Timeout(qb.timeout)
+			}
+			if qb.countCacheTTL > 0 {
+				tx = tx.WithCountCache(qb.countCacheTTL)
+			}
+			pageObj, err = tx.Paginate(pageNumber, pageSize, sql, args...)
 		} else {
-			pageObj, err = qb.db.Paginate(pageNumber, pageSize, sql, args...)
+			db := qb.db
+			if qb.timeout > 0 {
+				db = db.Timeout(qb.timeout)
+			}
+			if qb.countCacheTTL > 0 {
+				db = db.WithCountCache(qb.countCacheTTL)
+			}
+			pageObj, err = db.Paginate(pageNumber, pageSize, sql, args...)
 		}
 
 		if err == nil {
@@ -819,9 +843,24 @@ func (qb *QueryBuilder) Paginate(pageNumber, pageSize int) (*Page[Record], error
 
 	// 直接使用新的Paginate实现
 	if qb.tx != nil {
-		return qb.tx.Paginate(pageNumber, pageSize, sql, args...)
+		tx := qb.tx
+		if qb.timeout > 0 {
+			tx = tx.Timeout(qb.timeout)
+		}
+		if qb.countCacheTTL > 0 {
+			tx = tx.WithCountCache(qb.countCacheTTL)
+		}
+		return tx.Paginate(pageNumber, pageSize, sql, args...)
 	}
-	return qb.db.Paginate(pageNumber, pageSize, sql, args...)
+
+	db := qb.db
+	if qb.timeout > 0 {
+		db = db.Timeout(qb.timeout)
+	}
+	if qb.countCacheTTL > 0 {
+		db = db.WithCountCache(qb.countCacheTTL)
+	}
+	return db.Paginate(pageNumber, pageSize, sql, args...)
 }
 
 // Update executes an update query with the criteria in the builder

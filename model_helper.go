@@ -16,6 +16,7 @@ var (
 type ModelCache struct {
 	CacheRepositoryName string
 	CacheTTL            time.Duration
+	CountCacheTTL       time.Duration // 分页计数缓存时间
 }
 
 // SetCache 设置缓存名称和TTL
@@ -26,6 +27,13 @@ func (c *ModelCache) SetCache(cacheRepositoryName string, ttl ...time.Duration) 
 	} else {
 		c.CacheTTL = -1
 	}
+}
+
+// WithCountCache 设置分页计数缓存时间
+// 用于在分页查询时缓存 COUNT 查询结果，避免重复执行 COUNT 语句
+func (c *ModelCache) WithCountCache(ttl time.Duration) *ModelCache {
+	c.CountCacheTTL = ttl
+	return c
 }
 
 // GetCache 获取缓存配置，如果未设置则返回 nil
@@ -62,6 +70,9 @@ func PaginateModel[T IDbModel](model T, cache *ModelCache, page, pageSize int, w
 	db := Use(model.DatabaseName())
 	if cache != nil && cache.CacheRepositoryName != "" {
 		db = db.Cache(cache.CacheRepositoryName, cache.CacheTTL)
+		if cache.CountCacheTTL > 0 {
+			db = db.WithCountCache(cache.CountCacheTTL)
+		}
 	}
 	recordsPage, err := db.Table(model.TableName()).Where(whereSql, whereArgs...).OrderBy(orderBySql).Paginate(page, pageSize)
 	if err != nil {
@@ -74,6 +85,9 @@ func PaginateModel_FullSql[T IDbModel](model T, cache *ModelCache, page, pageSiz
 	db := Use(model.DatabaseName())
 	if cache != nil && cache.CacheRepositoryName != "" {
 		db = db.Cache(cache.CacheRepositoryName, cache.CacheTTL)
+		if cache.CountCacheTTL > 0 {
+			db = db.WithCountCache(cache.CountCacheTTL)
+		}
 	}
 	recordsPage, err := db.Paginate(page, pageSize, querySQL, whereArgs...)
 	if err != nil {

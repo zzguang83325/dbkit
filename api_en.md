@@ -1547,6 +1547,31 @@ func FindToDbModel(dest interface{}, table, whereSql, orderBySql string, whereAr
 func FindModel[T IDbModel](model T, cache *ModelCache, whereSql, orderBySql string, whereArgs ...interface{}) ([]T, error)
 func FindFirstModel[T IDbModel](model T, cache *ModelCache, whereSql string, whereArgs ...interface{}) (T, error)
 func PaginateModel[T IDbModel](model T, cache *ModelCache, page, pageSize int, whereSql, orderBySql string, whereArgs ...interface{}) (*Page[T], error)
+func PaginateModel_FullSql[T IDbModel](model T, cache *ModelCache, page, pageSize int, querySQL string, whereArgs ...interface{}) (*Page[T], error)
+```
+
+### ModelCache Methods
+```go
+func (c *ModelCache) SetCache(cacheRepositoryName string, ttl ...time.Duration)  // Set cache name and TTL
+func (c *ModelCache) WithCountCache(ttl time.Duration) *ModelCache               // Enable pagination count cache
+func (c *ModelCache) GetCache() *ModelCache                                      // Get cache configuration
+```
+
+**Example:**
+```go
+// Create user model and use method chaining to set cache
+user := &User{}
+
+// Method 1: Using method chaining (recommended)
+page, err := user.Cache("user_cache", 5*time.Minute).
+    WithCountCache(5*time.Minute).
+    PaginateBuilder(1, 10, "age > ?", "name ASC", 18)
+
+// Method 2: Using PaginateModel function
+// user.SetCache("user_cache", 5*time.Minute)
+// user.WithCountCache(5*time.Minute)
+// page, err := dbkit.PaginateModel(user, user.GetCache(), 1, 10, 
+//     "age > ?", "name ASC", 18)
 ```
 
 ---
@@ -1649,6 +1674,37 @@ Create query builder using Redis cache.
 **Example:**
 ```go
 orders, _ := dbkit.RedisCache("order_cache").Query("SELECT * FROM orders WHERE user_id = ?", userId)
+```
+
+#### WithCountCache
+```go
+func (db *DB) WithCountCache(ttl time.Duration) *DB
+func (tx *Tx) WithCountCache(ttl time.Duration) *Tx
+func (qb *QueryBuilder) WithCountCache(ttl time.Duration) *QueryBuilder
+func (b *SqlTemplateBuilder) WithCountCache(ttl time.Duration) *SqlTemplateBuilder
+```
+Enable pagination count cache to avoid repeated COUNT queries.
+
+**Example:**
+```go
+// SQL Template with count cache
+page, err := dbkit.SqlTemplate("getUserList", params).
+    Cache("sql_cache", 5*time.Minute).
+    WithCountCache(5*time.Minute).
+    Paginate(1, 10)
+
+// Table query with count cache
+page, err := dbkit.Table("users").
+    Where("age > ?", 30).
+    Cache("table_cache", 5*time.Minute).
+    WithCountCache(5*time.Minute).
+    Paginate(1, 10)
+
+// DbModel with count cache
+user := &User{}
+page, err := user.Cache("user_cache", 5*time.Minute).
+    WithCountCache(5*time.Minute).
+    PaginateBuilder(1, 10, "age > ?", "name ASC", 18)
 ```
 
 ### Default Cache Operations

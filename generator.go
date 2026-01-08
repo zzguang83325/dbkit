@@ -115,6 +115,14 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 		fieldName := SnakeToCamel(col.Name)
 		goType := dbTypeToGoType(col.Type, col.Nullable)
 
+		// 跳过空字段名
+		if fieldName == "" {
+			continue
+		}
+		if goType == "" {
+			goType = "interface{}"
+		}
+
 		tag := fmt.Sprintf("`column:\"%s\" json:\"%s\"`", col.Name, strings.ToLower(col.Name))
 
 		line := fmt.Sprintf("\t%s %s %s", fieldName, goType, tag)
@@ -142,6 +150,13 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 	sb.WriteString(fmt.Sprintf("// Cache sets the cache name and TTL for the next query\n"))
 	sb.WriteString(fmt.Sprintf("func (m *%s) Cache(cacheRepositoryName string, ttl ...time.Duration) *%s {\n", finalStructName, finalStructName))
 	sb.WriteString("\tm.SetCache(cacheRepositoryName, ttl...)\n")
+	sb.WriteString("\treturn m\n")
+	sb.WriteString("}\n\n")
+
+	// Add WithCountCache method (returns self type to support method chaining)
+	sb.WriteString(fmt.Sprintf("// WithCountCache 设置分页计数缓存时间，支持链式调用\n"))
+	sb.WriteString(fmt.Sprintf("func (m *%s) WithCountCache(ttl time.Duration) *%s {\n", finalStructName, finalStructName))
+	sb.WriteString("\tm.ModelCache.WithCountCache(ttl)\n")
 	sb.WriteString("\treturn m\n")
 	sb.WriteString("}\n\n")
 
@@ -267,12 +282,18 @@ func (mgr *dbManager) getTableColumns(table string) ([]ColumnInfo, error) {
 			}
 		} else {
 			for _, r := range records {
+				columnName := fmt.Sprintf("%v", r.Get("COLUMN_NAME"))
+				dataType := fmt.Sprintf("%v", r.Get("DATA_TYPE"))
+				isNullable := fmt.Sprintf("%v", r.Get("IS_NULLABLE"))
+				columnKey := fmt.Sprintf("%v", r.Get("COLUMN_KEY"))
+				columnComment := fmt.Sprintf("%v", r.Get("COLUMN_COMMENT"))
+
 				columns = append(columns, ColumnInfo{
-					Name:     r.GetString("COLUMN_NAME"),
-					Type:     r.GetString("DATA_TYPE"),
-					Nullable: r.GetString("IS_NULLABLE") == "YES",
-					IsPK:     r.GetString("COLUMN_KEY") == "PRI",
-					Comment:  r.GetString("COLUMN_COMMENT"),
+					Name:     columnName,
+					Type:     dataType,
+					Nullable: isNullable == "YES",
+					IsPK:     columnKey == "PRI",
+					Comment:  columnComment,
 				})
 			}
 		}
