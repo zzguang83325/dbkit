@@ -90,7 +90,13 @@ func ForceDeleteModel(model IDbModel) (int64, error) {
 	db := Use(model.DatabaseName())
 
 	// Get primary keys
-	pks, err := db.dbMgr.getPrimaryKeys(db.dbMgr.getDB(), model.TableName())
+
+	sdb, err := db.dbMgr.getDB()
+	if err != nil {
+		return 0, err
+	}
+
+	pks, err := db.dbMgr.getPrimaryKeys(sdb, model.TableName())
 	if err != nil {
 		return 0, err
 	}
@@ -116,9 +122,12 @@ func ForceDeleteModel(model IDbModel) (int64, error) {
 func RestoreModel(model IDbModel) (int64, error) {
 	record := ToRecord(model)
 	db := Use(model.DatabaseName())
-
+	sdb, err := db.dbMgr.getDB()
+	if err != nil {
+		return 0, err
+	}
 	// Get primary keys
-	pks, err := db.dbMgr.getPrimaryKeys(db.dbMgr.getDB(), model.TableName())
+	pks, err := db.dbMgr.getPrimaryKeys(sdb, model.TableName())
 	if err != nil {
 		return 0, err
 	}

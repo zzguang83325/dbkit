@@ -245,11 +245,15 @@ func (mgr *dbManager) getTableColumns(table string) ([]ColumnInfo, error) {
 	case MySQL:
 		// First try to get detailed information from INFORMATION_SCHEMA
 		query := "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_COMMENT, COLUMN_KEY FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ? AND TABLE_SCHEMA = (SELECT DATABASE()) ORDER BY ORDINAL_POSITION"
-		records, err := mgr.query(mgr.getDB(), query, table)
+		db, err := mgr.getDB()
+		if err != nil {
+			return nil, err
+		}
+		records, err := mgr.query(db, query, table)
 		if err != nil || len(records) == 0 {
 			// If failed or empty, try simple SHOW COLUMNS
 			query = fmt.Sprintf("SHOW COLUMNS FROM `%s`", table)
-			records, err = mgr.query(mgr.getDB(), query)
+			records, err = mgr.query(db, query)
 			if err != nil {
 				return nil, err
 			}
@@ -275,7 +279,12 @@ func (mgr *dbManager) getTableColumns(table string) ([]ColumnInfo, error) {
 	case SQLite3:
 		// 加上引号防止特殊表名
 		query := fmt.Sprintf("PRAGMA table_info('%s')", table)
-		records, err := mgr.query(mgr.getDB(), query)
+
+		db, err := mgr.getDB()
+		if err != nil {
+			return nil, err
+		}
+		records, err := mgr.query(db, query)
 		if err != nil {
 			return nil, err
 		}
@@ -289,7 +298,11 @@ func (mgr *dbManager) getTableColumns(table string) ([]ColumnInfo, error) {
 		}
 	case PostgreSQL:
 		query := "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ? ORDER BY ordinal_position"
-		records, err := mgr.query(mgr.getDB(), query, table)
+		db, err := mgr.getDB()
+		if err != nil {
+			return nil, err
+		}
+		records, err := mgr.query(db, query, table)
 		if err != nil {
 			return nil, err
 		}
@@ -302,7 +315,11 @@ func (mgr *dbManager) getTableColumns(table string) ([]ColumnInfo, error) {
 		}
 	case SQLServer:
 		query := "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ? ORDER BY ORDINAL_POSITION"
-		records, err := mgr.query(mgr.getDB(), query, table)
+		db, err := mgr.getDB()
+		if err != nil {
+			return nil, err
+		}
+		records, err := mgr.query(db, query, table)
 		if err != nil {
 			return nil, err
 		}
@@ -316,7 +333,11 @@ func (mgr *dbManager) getTableColumns(table string) ([]ColumnInfo, error) {
 	case Oracle:
 		upperTable := strings.ToUpper(table)
 		query := "SELECT COLUMN_NAME, DATA_TYPE, NULLABLE FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ? ORDER BY COLUMN_ID"
-		records, err := mgr.query(mgr.getDB(), query, upperTable)
+		db, err := mgr.getDB()
+		if err != nil {
+			return nil, err
+		}
+		records, err := mgr.query(db, query, upperTable)
 		if err != nil {
 			return nil, err
 		}

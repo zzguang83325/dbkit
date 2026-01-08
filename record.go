@@ -10,47 +10,50 @@ import (
 )
 
 // Record represents a single record in the database, similar to JFinal's ActiveRecord
+// columns 保留原始大小写用于生成 SQL，lowerKeyMap 用于大小写不敏感的快速查找
 type Record struct {
-	columns map[string]interface{}
-	mu      sync.RWMutex
+	columns     map[string]interface{} // 原始键名 -> 值
+	lowerKeyMap map[string]string      // 小写键名 -> 原始键名（用于快速查找）
+	mu          sync.RWMutex
 }
 
 // NewRecord creates a new empty Record
 func NewRecord() *Record {
 	return &Record{
-		columns: make(map[string]interface{}),
+		columns:     make(map[string]interface{}),
+		lowerKeyMap: make(map[string]string),
 	}
 }
 
 // Set sets a column value in the Record with case-insensitive support for existing columns
+// 保留原始大小写用于 SQL 生成，同时维护小写映射用于快速查找
 func (r *Record) Set(column string, value interface{}) *Record {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Check if a column with different case already exists
-	for k := range r.columns {
-		if strings.EqualFold(k, column) {
-			r.columns[k] = value
-			return r
-		}
+	lowerKey := strings.ToLower(column)
+
+	// 如果已存在相同小写键名的字段，更新原有字段
+	if existingKey, exists := r.lowerKeyMap[lowerKey]; exists {
+		r.columns[existingKey] = value
+		return r
 	}
+
+	// 新字段：保存原始大小写和映射关系
 	r.columns[column] = value
+	r.lowerKeyMap[lowerKey] = column
 	return r
 }
 
 // getValue gets a column value from the Record with case-insensitive support
+// 通过小写映射快速查找，O(1) 复杂度
 func (r *Record) getValue(column string) interface{} {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if val, ok := r.columns[column]; ok {
-		return val
-	}
-	// Case-insensitive fallback
-	for k, v := range r.columns {
-		if strings.EqualFold(k, column) {
-			return v
-		}
+	lowerKey := strings.ToLower(column)
+	if actualKey, exists := r.lowerKeyMap[lowerKey]; exists {
+		return r.columns[actualKey]
 	}
 	return nil
 }
@@ -218,19 +221,14 @@ func (r *Record) GetBool(column string) bool {
 }
 
 // Has checks if a column exists in the Record
+// Has checks if a column exists in the Record
 func (r *Record) Has(column string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if _, ok := r.columns[column]; ok {
-		return true
-	}
-	for k := range r.columns {
-		if strings.EqualFold(k, column) {
-			return true
-		}
-	}
-	return false
+	lowerKey := strings.ToLower(column)
+	_, exists := r.lowerKeyMap[lowerKey]
+	return exists
 }
 
 // Keys returns all column names
@@ -250,21 +248,19 @@ func (r *Record) Remove(column string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for k := range r.columns {
-		if strings.EqualFold(k, column) {
-			delete(r.columns, k)
-			return
-		}
+	lowerKey := strings.ToLower(column)
+	if actualKey, exists := r.lowerKeyMap[lowerKey]; exists {
+		delete(r.columns, actualKey)
+		delete(r.lowerKeyMap, lowerKey)
 	}
-	delete(r.columns, column)
 }
 
-// Clear clears all columns
 // Clear clears all columns
 func (r *Record) Clear() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.columns = make(map[string]interface{})
+	r.lowerKeyMap = make(map[string]string)
 }
 
 // ToMap converts the Record to a map
@@ -306,7 +302,25 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 	if r.columns == nil {
 		r.columns = make(map[string]interface{})
 	}
-	return json.Unmarshal(data, &r.columns)
+	if r.lowerKeyMap == nil {
+		r.lowerKeyMap = make(map[string]string)
+	}
+
+	// 清空现有数据
+	r.columns = make(map[string]interface{})
+	r.lowerKeyMap = make(map[string]string)
+
+	// 反序列化
+	if err := json.Unmarshal(data, &r.columns); err != nil {
+		return err
+	}
+
+	// 重建小写映射
+	for k := range r.columns {
+		r.lowerKeyMap[strings.ToLower(k)] = k
+	}
+
+	return nil
 }
 
 // FromJson parses JSON string into the Record

@@ -292,7 +292,11 @@ func (mgr *ConcurrentPaginationManager) executePaginationQuery(
 		}
 
 		// 缓存未命中或转换失败，执行查询
-		list, err := db.dbMgr.queryWithContext(ctx, db.dbMgr.getDB(), paginationSQL, args...)
+		sdb, err := db.dbMgr.getDB()
+		if err != nil {
+			return nil, err
+		}
+		list, err := db.dbMgr.queryWithContext(ctx, sdb, paginationSQL, args...)
 		if err != nil {
 			return nil, fmt.Errorf("pagination query failed: %w", err)
 		}
@@ -302,7 +306,11 @@ func (mgr *ConcurrentPaginationManager) executePaginationQuery(
 		return NewPage(list, page, pageSize, totalRow), nil
 	} else {
 		// 不使用缓存
-		list, err := db.dbMgr.queryWithContext(ctx, db.dbMgr.getDB(), paginationSQL, args...)
+		sdb, err := db.dbMgr.getDB()
+		if err != nil {
+			return nil, err
+		}
+		list, err := db.dbMgr.queryWithContext(ctx, sdb, paginationSQL, args...)
 		if err != nil {
 			return nil, fmt.Errorf("pagination query failed: %w", err)
 		}

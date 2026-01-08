@@ -61,8 +61,8 @@ type PaginationConfig struct {
 // DefaultPaginationConfig 返回默认的分页配置
 func DefaultPaginationConfig() *PaginationConfig {
 	return &PaginationConfig{
-		DefaultPageSize: 10,
-		MaxPageSize:     1000,
+		DefaultPageSize: DefaultPageSize,
+		MaxPageSize:     MaxPageSize,
 		DefaultOrderBy:  "",
 	}
 }
@@ -74,12 +74,12 @@ func ValidatePaginationParams(page, pageSize int, config *PaginationConfig) (int
 	}
 
 	// 验证页码
-	if page < 1 {
-		page = 1
+	if page < MinPageSize {
+		page = DefaultPage
 	}
 
 	// 验证页面大小
-	if pageSize < 1 {
+	if pageSize < MinPageSize {
 		pageSize = config.DefaultPageSize
 	}
 	if pageSize > config.MaxPageSize {

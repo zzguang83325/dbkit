@@ -167,7 +167,11 @@ func (db *DB) ForceDelete(table string, whereSql string, whereArgs ...interface{
 	if db.lastErr != nil {
 		return 0, db.lastErr
 	}
-	return db.dbMgr.forceDelete(db.dbMgr.getDB(), table, whereSql, whereArgs...)
+	sdb, err := db.dbMgr.getDB()
+	if err != nil {
+		return 0, err
+	}
+	return db.dbMgr.forceDelete(sdb, table, whereSql, whereArgs...)
 }
 
 // Restore restores soft-deleted records
@@ -175,7 +179,11 @@ func (db *DB) Restore(table string, whereSql string, whereArgs ...interface{}) (
 	if db.lastErr != nil {
 		return 0, db.lastErr
 	}
-	return db.dbMgr.restore(db.dbMgr.getDB(), table, whereSql, whereArgs...)
+	sdb, err := db.dbMgr.getDB()
+	if err != nil {
+		return 0, err
+	}
+	return db.dbMgr.restore(sdb, table, whereSql, whereArgs...)
 }
 
 // --- Tx Methods ---

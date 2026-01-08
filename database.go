@@ -41,10 +41,11 @@ var (
 	oraclePlaceholderRe    = regexp.MustCompile(`:(\d+)`)
 )
 
-// 预编译语句缓存相关常量
+// 预编译语句缓存相关常量已移至 constants.go
+// 为了向后兼容，保留这些常量的别名
 const (
-	stmtCacheRepository = "__dbkit_stmt_cache__" // 内部使用的缓存名称
-	stmtCacheTTL        = 30 * time.Minute       // 预编译语句缓存时间
+	stmtCacheRepository = StmtCacheRepository // 内部使用的缓存名称
+	stmtCacheTTL        = StmtCacheTTL        // 预编译语句缓存时间
 )
 
 // Config holds the database configuration
@@ -2077,10 +2078,14 @@ func (mgr *dbManager) batchDeleteByIds(executor sqlExecutor, table string, ids [
 
 func (mgr *dbManager) paginate(executor sqlExecutor, querySQL string, page, pageSize int, args ...interface{}) ([]Record, int64, error) {
 	if page < 1 {
-		page = 1
+		page = DefaultPage
 	}
 	if pageSize < 1 {
-		pageSize = 10
+		pageSize = DefaultPageSize
+	}
+	// 限制最大页面大小，防止一次查询过多数据
+	if pageSize > MaxPageSize {
+		pageSize = MaxPageSize
 	}
 
 	driver := mgr.config.Driver
@@ -2288,7 +2293,7 @@ func scanMaps(rows *sql.Rows, driver DriverType) ([]map[string]interface{}, erro
 }
 
 // GetDB returns the underlying database connection
-func (db *DB) GetDB() *sql.DB {
+func (db *DB) GetDB() (*sql.DB, error) {
 	return db.dbMgr.getDB()
 }
 
@@ -2340,12 +2345,12 @@ func safeGetCurrentDB() (*dbManager, error) {
 }
 
 // GetCurrentDB returns the current database manager
-func GetCurrentDB() *dbManager {
+func GetCurrentDB() (*dbManager, error) {
 	dbMgr, err := safeGetCurrentDB()
 	if err != nil {
-		panic(err.Error())
+		return nil, err
 	}
-	return dbMgr
+	return dbMgr, nil
 }
 
 // GetConfig returns the database configuration
@@ -2369,8 +2374,19 @@ func GetDatabase(dbname string) *dbManager {
 }
 
 // GetDB returns the underlying database connection of current database
-func GetDB() *sql.DB {
-	return GetCurrentDB().getDB()
+func GetDB() (*sql.DB, error) {
+
+	mgr, err := GetCurrentDB()
+	if err != nil {
+		return nil, err
+	}
+	// *sql.DB, error
+	db, err := mgr.getDB()
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
+	// return GetCurrentDB().getDB()
 }
 
 // GetDBByName returns the database connection by name
@@ -2383,7 +2399,12 @@ func GetDBByName(dbname string) (*sql.DB, error) {
 		return nil, fmt.Errorf("database '%s' not found", dbname)
 	}
 
-	return dbMgr.getDB(), nil
+	db, err := dbMgr.getDB()
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
+	// return dbMgr.getDB(), nil
 }
 
 // Close closes the database connection
@@ -2607,16 +2628,18 @@ func (mgr *dbManager) initDB() error {
 }
 
 // getDB returns the database connection, initializing if necessary
-func (mgr *dbManager) getDB() *sql.DB {
+func (mgr *dbManager) getDB() (*sql.DB, error) {
 	if mgr == nil {
-		panic("dbkit: database manager is nil. Please call dbkit.OpenDatabase()  before using dbkit operations")
+		return nil, fmt.Errorf("dbkit: database manager is nil. Please call dbkit.OpenDatabase()  before using dbkit operations")
+		// panic("dbkit: database manager is nil. Please call dbkit.OpenDatabase()  before using dbkit operations")
 	}
 	if mgr.db == nil {
 		if err := mgr.initDB(); err != nil {
-			panic(fmt.Sprintf("dbkit: failed to initialize database: %v", err))
+			//panic(fmt.Sprintf("dbkit: failed to initialize database: %v", err))
+			return nil, fmt.Errorf("dbkit: failed to initialize database " + err.Error())
 		}
 	}
-	return mgr.db
+	return mgr.db, nil
 }
 
 // Ping checks if the database connection is alive
