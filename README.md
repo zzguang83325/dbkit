@@ -229,7 +229,7 @@ func main() {
 
 
 
-#### DbModel的基本使用 
+#### DbModel的基本使用
 
 - 需要先调用 GenerateDbModel 函数生成 结构体  (自动实现IDbModel接口)
 
@@ -762,7 +762,7 @@ func (m *User) Save() (int64, error) {
 // ... 其他方法 (Insert, Update, Delete, FindFirst)
 ```
 
-#### DbModel的使用 
+#### DbModel的使用
 
 ##### 1. 插入与保存 (Insert / Save)
 
@@ -820,7 +820,7 @@ err := dbkit.FindFirstToDbModel(user, "id = ?", 100)
 
 ```
 
-##### 5. 查询多条 
+##### 5. 查询多条
 
 `FindFirstToDbModel(model, where, args...)` 将查询结果的第一条直接映射到指定的 Struct 中。
 
@@ -849,7 +849,7 @@ if err != nil {
 
 ### 6. 事务处理
 
-##### 自动事务 
+##### 自动事务
 
 `Transaction` 函数会自动处理 `Commit` 和 `Rollback`。只要闭包返回 `error`，事务就会回滚。
 
@@ -885,7 +885,7 @@ tx.Commit()   // 或 tx.Rollback()
 	dbkit.SetDebugMode(true)
 ```
 
-#### 2. 使用slog日志 
+#### 2. 使用slog日志
 
 ```go
 	logFile := filepath.Join(".", "logfile.log")
@@ -894,7 +894,7 @@ tx.Commit()   // 或 tx.Rollback()
 
 
 
-#### 2. 使用 Zap 日志库 
+#### 2. 使用 Zap 日志库
 
 ```go
 
@@ -1545,7 +1545,7 @@ import "github.com/zzguang83325/dbkit/redis"
 // 创建 Redis 缓存实例 (参数：地址, 用户名, 密码, DB)
 rc, err := redis.NewRedisCache("localhost:6379", "username", "password", 1)
 if err == nil {
-    dbkit.SetCache(rc) // 切换全局缓存为 Redis
+    dbkit.SetDefaultCache(rc) // 切换全局缓存为 Redis
 }
 ```
 

@@ -479,7 +479,7 @@ import "github.com/zzguang83325/dbkit/redis"
 // Create Redis cache instance (parameters: address, username, password, DB)
 rc, err := redis.NewRedisCache("localhost:6379", "username", "password", 1)
 if err == nil {
-    dbkit.SetCache(rc) // Switch global cache to Redis
+    dbkit.SetDefaultCache(rc) // Switch global cache to Redis
 }
 ```
 

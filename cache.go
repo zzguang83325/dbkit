@@ -229,7 +229,7 @@ func GetCache() CacheProvider {
 }
 
 // SetCache sets the global cache provider
-func SetCache(c CacheProvider) {
+func SetDefaultCache(c CacheProvider) {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 	defaultCache = c

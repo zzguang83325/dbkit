@@ -44,7 +44,7 @@ func main() {
 		fmt.Printf("Redis 连接失败: %v\n", err)
 		return
 	}
-	dbkit.SetCache(rc)
+	dbkit.SetDefaultCache(rc)
 	fmt.Println("✓ Redis 已连接并切换为默认缓存提供者")
 
 	// ========== 性能测试：展示优化效果 ==========
