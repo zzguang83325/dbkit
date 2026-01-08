@@ -611,14 +611,14 @@ func testCache() {
 	fmt.Println("\n[Test 9: Caching]")
 	fmt.Println("\n[测试 9: 缓存]")
 
-	cacheName := "test_cache"
+	cacheRepositoryName := "test_cache"
 
 	// First query (from database)
 	// 第一次查询 (查数据库)
 	start := time.Now()
 	users1, err := dbkit.Table("users").
 		Where("status = ?", "active").
-		Cache(cacheName, 30*time.Second).
+		Cache(cacheRepositoryName, 30*time.Second).
 		Find()
 	elapsed1 := time.Since(start)
 	if err != nil {
@@ -632,7 +632,7 @@ func testCache() {
 	start = time.Now()
 	users2, err := dbkit.Table("users").
 		Where("status = ?", "active").
-		Cache(cacheName, 30*time.Second).
+		Cache(cacheRepositoryName, 30*time.Second).
 		Find()
 	elapsed2 := time.Since(start)
 	if err != nil {

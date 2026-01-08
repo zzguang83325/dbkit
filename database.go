@@ -68,11 +68,11 @@ func IsValidDriver(driver DriverType) bool {
 
 // DB represents a database connection with chainable methods
 type DB struct {
-	dbMgr     *dbManager
-	lastErr   error
-	cacheName string
-	cacheTTL  time.Duration
-	timeout   time.Duration // Query timeout for this instance
+	dbMgr               *dbManager
+	lastErr             error
+	cacheRepositoryName string
+	cacheTTL            time.Duration
+	timeout             time.Duration // Query timeout for this instance
 }
 
 // GetConfig returns the database configuration
@@ -105,11 +105,11 @@ func (db *DB) getContext() (context.Context, context.CancelFunc) {
 
 // Tx represents a database transaction with chainable methods
 type Tx struct {
-	tx        *sql.Tx
-	dbMgr     *dbManager
-	cacheName string
-	cacheTTL  time.Duration
-	timeout   time.Duration // Query timeout for this transaction
+	tx                  *sql.Tx
+	dbMgr               *dbManager
+	cacheRepositoryName string
+	cacheTTL            time.Duration
+	timeout             time.Duration // Query timeout for this transaction
 }
 
 // sqlExecutor is an internal interface for executing SQL commands

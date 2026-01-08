@@ -1573,31 +1573,31 @@ Configure local cache cleanup interval.
 
 ### CreateCache
 ```go
-func CreateCache(cacheName string, ttl time.Duration)
+func CreateCache(cacheRepositoryName string, ttl time.Duration)
 ```
 Create named cache and set default TTL.
 
 ### CacheSet
 ```go
-func CacheSet(cacheName, key string, value interface{}, ttl ...time.Duration)
+func CacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration)
 ```
 Set cache value.
 
 ### CacheGet
 ```go
-func CacheGet(cacheName, key string) (interface{}, bool)
+func CacheGet(cacheRepositoryName, key string) (interface{}, bool)
 ```
 Get cache value.
 
 ### CacheDelete
 ```go
-func CacheDelete(cacheName, key string)
+func CacheDelete(cacheRepositoryName, key string)
 ```
 Delete cache key.
 
 ### CacheClear
 ```go
-func CacheClear(cacheName string)
+func CacheClear(cacheRepositoryName string)
 ```
 Clear specified cache.
 
@@ -1623,10 +1623,10 @@ records, err := dbkit.Cache("user_cache", 5*time.Minute).Query("SELECT * FROM us
 ### CacheProvider Interface
 ```go
 type CacheProvider interface {
-    CacheGet(cacheName, key string) (interface{}, bool)
-    CacheSet(cacheName, key string, value interface{}, ttl time.Duration)
-    CacheDelete(cacheName, key string)
-    CacheClear(cacheName string)
+    CacheGet(cacheRepositoryName, key string) (interface{}, bool)
+    CacheSet(cacheRepositoryName, key string, value interface{}, ttl time.Duration)
+    CacheDelete(cacheRepositoryName, key string)
+    CacheClear(cacheRepositoryName string)
     Status() map[string]interface{}
 }
 ```

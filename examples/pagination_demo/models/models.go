@@ -39,8 +39,8 @@ func (u *User) PaginateBuilder(page int, pageSize int, whereSql string, orderBy 
 // Paginate 使用完整SQL进行分页查询（推荐方法）
 func (u *User) Paginate(page int, pageSize int, querySQL string, args ...interface{}) (*dbkit.Page[*User], error) {
 	db := dbkit.Use(u.DatabaseName())
-	if cache := u.GetCache(); cache != nil && cache.CacheName != "" {
-		db = db.Cache(cache.CacheName, cache.CacheTTL)
+	if cache := u.GetCache(); cache != nil && cache.CacheRepositoryName != "" {
+		db = db.Cache(cache.CacheRepositoryName, cache.CacheTTL)
 	}
 	recordsPage, err := db.Paginate(page, pageSize, querySQL, args...)
 	if err != nil {

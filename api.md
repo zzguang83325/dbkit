@@ -1574,31 +1574,31 @@ func SetLocalCacheConfig(cleanupInterval time.Duration)
 
 ### CreateCache
 ```go
-func CreateCache(cacheName string, ttl time.Duration)
+func CreateCache(cacheRepositoryName string, ttl time.Duration)
 ```
 创建命名缓存并设置默认 TTL。
 
 ### CacheSet
 ```go
-func CacheSet(cacheName, key string, value interface{}, ttl ...time.Duration)
+func CacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration)
 ```
 设置缓存值。
 
 ### CacheGet
 ```go
-func CacheGet(cacheName, key string) (interface{}, bool)
+func CacheGet(cacheRepositoryName, key string) (interface{}, bool)
 ```
 获取缓存值。
 
 ### CacheDelete
 ```go
-func CacheDelete(cacheName, key string)
+func CacheDelete(cacheRepositoryName, key string)
 ```
 删除缓存键。
 
 ### CacheClear
 ```go
-func CacheClear(cacheName string)
+func CacheClear(cacheRepositoryName string)
 ```
 清空指定缓存。
 
@@ -1624,10 +1624,10 @@ records, err := dbkit.Cache("user_cache", 5*time.Minute).Query("SELECT * FROM us
 ### CacheProvider 接口
 ```go
 type CacheProvider interface {
-    CacheGet(cacheName, key string) (interface{}, bool)
-    CacheSet(cacheName, key string, value interface{}, ttl time.Duration)
-    CacheDelete(cacheName, key string)
-    CacheClear(cacheName string)
+    CacheGet(cacheRepositoryName, key string) (interface{}, bool)
+    CacheSet(cacheRepositoryName, key string, value interface{}, ttl time.Duration)
+    CacheDelete(cacheRepositoryName, key string)
+    CacheClear(cacheRepositoryName string)
     Status() map[string]interface{}
 }
 ```

@@ -40,7 +40,7 @@ func main() {
 	user.Cache("test_cache", 5*time.Minute)
 	cache := user.GetCache()
 	if cache != nil {
-		fmt.Printf("✅ 缓存设置成功: %s (TTL: %v)\n", cache.CacheName, cache.CacheTTL)
+		fmt.Printf("✅ 缓存设置成功: %s (TTL: %v)\n", cache.CacheRepositoryName, cache.CacheTTL)
 	}
 
 	// 测试 Page 结构体

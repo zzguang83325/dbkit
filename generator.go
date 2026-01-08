@@ -140,8 +140,8 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 
 	// Add Cache method (returns self type to support method chaining)
 	sb.WriteString(fmt.Sprintf("// Cache sets the cache name and TTL for the next query\n"))
-	sb.WriteString(fmt.Sprintf("func (m *%s) Cache(name string, ttl ...time.Duration) *%s {\n", finalStructName, finalStructName))
-	sb.WriteString("\tm.SetCache(name, ttl...)\n")
+	sb.WriteString(fmt.Sprintf("func (m *%s) Cache(cacheRepositoryName string, ttl ...time.Duration) *%s {\n", finalStructName, finalStructName))
+	sb.WriteString("\tm.SetCache(cacheRepositoryName, ttl...)\n")
 	sb.WriteString("\treturn m\n")
 	sb.WriteString("}\n\n")
 

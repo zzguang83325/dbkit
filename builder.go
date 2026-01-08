@@ -22,31 +22,31 @@ type SelectSubquery struct {
 
 // QueryBuilder represents a fluent interface for building SQL queries
 type QueryBuilder struct {
-	db               *DB
-	tx               *Tx
-	table            string
-	selectSql        string
-	whereSql         []string
-	whereArgs        []interface{}
-	orWhereSql       []string      // OR conditions
-	orWhereArgs      []interface{} // OR condition arguments
-	orderBy          string
-	groupBy          string        // GROUP BY clause
-	havingSql        []string      // HAVING conditions
-	havingArgs       []interface{} // HAVING arguments
-	limit            int
-	offset           int
-	cacheName        string
-	cacheTTL         time.Duration
-	timeout          time.Duration
-	lastErr          error
-	withTrashed      bool             // Include soft-deleted records
-	onlyTrashed      bool             // Only query soft-deleted records
-	skipTimestamps   bool             // Skip auto timestamps for insert/update
-	joins            []JoinClause     // JOIN clauses
-	subqueryTable    *Subquery        // FROM subquery
-	subqueryAlias    string           // FROM subquery alias
-	selectSubqueries []SelectSubquery // SELECT subqueries
+	db                  *DB
+	tx                  *Tx
+	table               string
+	selectSql           string
+	whereSql            []string
+	whereArgs           []interface{}
+	orWhereSql          []string      // OR conditions
+	orWhereArgs         []interface{} // OR condition arguments
+	orderBy             string
+	groupBy             string        // GROUP BY clause
+	havingSql           []string      // HAVING conditions
+	havingArgs          []interface{} // HAVING arguments
+	limit               int
+	offset              int
+	cacheRepositoryName string
+	cacheTTL            time.Duration
+	timeout             time.Duration
+	lastErr             error
+	withTrashed         bool             // Include soft-deleted records
+	onlyTrashed         bool             // Only query soft-deleted records
+	skipTimestamps      bool             // Skip auto timestamps for insert/update
+	joins               []JoinClause     // JOIN clauses
+	subqueryTable       *Subquery        // FROM subquery
+	subqueryAlias       string           // FROM subquery alias
+	selectSubqueries    []SelectSubquery // SELECT subqueries
 }
 
 // Table starts a new query builder for the default database
@@ -74,12 +74,12 @@ func (db *DB) Table(name string) *QueryBuilder {
 		return &QueryBuilder{lastErr: err}
 	}
 	return &QueryBuilder{
-		db:        db,
-		table:     name,
-		selectSql: "*",
-		cacheName: db.cacheName,
-		cacheTTL:  db.cacheTTL,
-		lastErr:   db.lastErr,
+		db:                  db,
+		table:               name,
+		selectSql:           "*",
+		cacheRepositoryName: db.cacheRepositoryName,
+		cacheTTL:            db.cacheTTL,
+		lastErr:             db.lastErr,
 	}
 }
 
@@ -90,11 +90,11 @@ func (tx *Tx) Table(name string) *QueryBuilder {
 	}
 
 	return &QueryBuilder{
-		tx:        tx,
-		table:     name,
-		selectSql: "*",
-		cacheName: tx.cacheName,
-		cacheTTL:  tx.cacheTTL,
+		tx:                  tx,
+		table:               name,
+		selectSql:           "*",
+		cacheRepositoryName: tx.cacheRepositoryName,
+		cacheTTL:            tx.cacheTTL,
 	}
 }
 
@@ -404,8 +404,8 @@ func (qb *QueryBuilder) SelectSubquery(sub *Subquery, alias string) *QueryBuilde
 }
 
 // Cache enables caching for the query
-func (qb *QueryBuilder) Cache(name string, ttl ...time.Duration) *QueryBuilder {
-	qb.cacheName = name
+func (qb *QueryBuilder) Cache(cacheRepositoryName string, ttl ...time.Duration) *QueryBuilder {
+	qb.cacheRepositoryName = cacheRepositoryName
 	if len(ttl) > 0 {
 		qb.cacheTTL = ttl[0]
 	} else {
@@ -594,9 +594,9 @@ func (qb *QueryBuilder) Query() ([]Record, error) {
 	sql, args := qb.buildSelectSql()
 
 	// Handle caching
-	if qb.cacheName != "" && qb.tx == nil {
+	if qb.cacheRepositoryName != "" && qb.tx == nil {
 		cacheKey := qb.generateCacheKey(sql, args)
-		if val, ok := CacheGet(qb.cacheName, cacheKey); ok {
+		if val, ok := CacheGet(qb.cacheRepositoryName, cacheKey); ok {
 			if records, ok := val.([]Record); ok {
 				return records, nil
 			}
@@ -608,7 +608,7 @@ func (qb *QueryBuilder) Query() ([]Record, error) {
 		}
 		records, err := db.Query(sql, args...)
 		if err == nil {
-			CacheSet(qb.cacheName, cacheKey, records, qb.cacheTTL)
+			CacheSet(qb.cacheRepositoryName, cacheKey, records, qb.cacheTTL)
 		}
 		return records, err
 	}
@@ -673,9 +673,9 @@ func (qb *QueryBuilder) QueryFirst() (*Record, error) {
 	qb.limit = oldLimit
 
 	// Handle caching
-	if qb.cacheName != "" && qb.tx == nil {
+	if qb.cacheRepositoryName != "" && qb.tx == nil {
 		cacheKey := qb.generateCacheKey(sql, args) + "_first"
-		if val, ok := CacheGet(qb.cacheName, cacheKey); ok {
+		if val, ok := CacheGet(qb.cacheRepositoryName, cacheKey); ok {
 			if record, ok := val.(*Record); ok {
 				return record, nil
 			}
@@ -687,7 +687,7 @@ func (qb *QueryBuilder) QueryFirst() (*Record, error) {
 		}
 		record, err := db.QueryFirst(sql, args...)
 		if err == nil && record != nil {
-			CacheSet(qb.cacheName, cacheKey, record, qb.cacheTTL)
+			CacheSet(qb.cacheRepositoryName, cacheKey, record, qb.cacheTTL)
 		}
 		return record, err
 	}
@@ -737,9 +737,9 @@ func (qb *QueryBuilder) Paginate(pageNumber, pageSize int) (*Page[Record], error
 	sql = removeLimitOffset(sql)
 
 	// 处理缓存
-	if qb.cacheName != "" && qb.tx == nil {
+	if qb.cacheRepositoryName != "" && qb.tx == nil {
 		cacheKey := qb.generateCacheKey(sql, args) + fmt.Sprintf("_p%d_s%d", pageNumber, pageSize)
-		if val, ok := CacheGet(qb.cacheName, cacheKey); ok {
+		if val, ok := CacheGet(qb.cacheRepositoryName, cacheKey); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
@@ -756,7 +756,7 @@ func (qb *QueryBuilder) Paginate(pageNumber, pageSize int) (*Page[Record], error
 		}
 
 		if err == nil {
-			CacheSet(qb.cacheName, cacheKey, pageObj, qb.cacheTTL)
+			CacheSet(qb.cacheRepositoryName, cacheKey, pageObj, qb.cacheTTL)
 		}
 		return pageObj, err
 	}
@@ -833,10 +833,10 @@ func (qb *QueryBuilder) Count() (int64, error) {
 	}
 
 	// Handle caching
-	if qb.cacheName != "" && qb.tx == nil {
+	if qb.cacheRepositoryName != "" && qb.tx == nil {
 		sql, args := qb.buildSelectSql()
 		cacheKey := qb.generateCacheKey(sql, args) + "_count"
-		if val, ok := CacheGet(qb.cacheName, cacheKey); ok {
+		if val, ok := CacheGet(qb.cacheRepositoryName, cacheKey); ok {
 			if count, ok := val.(int64); ok {
 				return count, nil
 			}
@@ -845,7 +845,7 @@ func (qb *QueryBuilder) Count() (int64, error) {
 		// If not in cache, query and store
 		count, err := qb.db.Count(qb.table, whereSql, qb.whereArgs...)
 		if err == nil {
-			CacheSet(qb.cacheName, cacheKey, count, qb.cacheTTL)
+			CacheSet(qb.cacheRepositoryName, cacheKey, count, qb.cacheTTL)
 		}
 		return count, err
 	}

@@ -29,8 +29,8 @@ func (m *Demo) DatabaseName() string {
 }
 
 // Cache sets the cache name and TTL for the next query
-func (m *Demo) Cache(name string, ttl ...time.Duration) *Demo {
-	m.SetCache(name, ttl...)
+func (m *Demo) Cache(cacheRepositoryName string, ttl ...time.Duration) *Demo {
+	m.SetCache(cacheRepositoryName, ttl...)
 	return m
 }
 
@@ -96,7 +96,7 @@ func (m *Demo) PaginateBuilder(page int, pageSize int, whereSql string, orderBy 
 }
 
 // Paginate paginates Demo records using complete SQL statement (recommended)
-// 使用完整SQL语句进行分页查询，自动解析SQL并根据数据库类型生成相应的分页语句
+// Uses complete SQL statement for pagination query, automatically parses SQL and generates corresponding pagination statements based on database type
 func (m *Demo) Paginate(page int, pageSize int, fullSQL string, args ...interface{}) (*dbkit.Page[*Demo], error) {
 	return dbkit.PaginateModel_FullSql[*Demo](m, m.GetCache(), page, pageSize, fullSQL, args...)
 }

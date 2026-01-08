@@ -199,8 +199,8 @@ type User struct {
 ```go
 func (u *User) PaginateSQL(page int, pageSize int, querySQL string, args ...interface{}) (*dbkit.Page[*User], error) {
     db := dbkit.Use(u.DatabaseName())
-    if cache := u.GetCache(); cache != nil && cache.CacheName != "" {
-        db = db.Cache(cache.CacheName, cache.CacheTTL)
+    if cache := u.GetCache(); cache != nil && cache.CacheRepositoryName != "" {
+        db = db.Cache(Cache.cacheRepositoryName, cache.CacheTTL)
     }
     recordsPage, err := db.PaginateSQL(page, pageSize, querySQL, args...)
     if err != nil {

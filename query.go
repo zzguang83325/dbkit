@@ -312,8 +312,8 @@ func FindToDbModel(dest interface{}, table string, whereSql string, orderBySql s
 
 // --- DB Methods (Operation on specific database instance) ---
 
-func (db *DB) Cache(name string, ttl ...time.Duration) *DB {
-	db.cacheName = name
+func (db *DB) Cache(cacheRepositoryName string, ttl ...time.Duration) *DB {
+	db.cacheRepositoryName = cacheRepositoryName
 	if len(ttl) > 0 {
 		db.cacheTTL = ttl[0]
 	} else {
@@ -335,9 +335,9 @@ func (db *DB) Query(querySQL string, args ...interface{}) ([]Record, error) {
 	ctx, cancel := db.getContext()
 	defer cancel()
 
-	if db.cacheName != "" {
+	if db.cacheRepositoryName != "" {
 		key := GenerateCacheKey(db.dbMgr.name, querySQL, args...)
-		if val, ok := GetCache().CacheGet(db.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
 			var results []Record
 			if convertCacheValue(val, &results) {
 				return results, nil
@@ -345,7 +345,7 @@ func (db *DB) Query(querySQL string, args ...interface{}) ([]Record, error) {
 		}
 		results, err := db.dbMgr.queryWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 		if err == nil {
-			GetCache().CacheSet(db.cacheName, key, results, getEffectiveTTL(db.cacheName, db.cacheTTL))
+			GetCache().CacheSet(db.cacheRepositoryName, key, results, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 		}
 		return results, err
 	}
@@ -359,9 +359,9 @@ func (db *DB) QueryFirst(querySQL string, args ...interface{}) (*Record, error) 
 	ctx, cancel := db.getContext()
 	defer cancel()
 
-	if db.cacheName != "" {
+	if db.cacheRepositoryName != "" {
 		key := GenerateCacheKey(db.dbMgr.name, querySQL, args...)
-		if val, ok := GetCache().CacheGet(db.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
 			var result *Record
 			if convertCacheValue(val, &result) {
 				return result, nil
@@ -369,7 +369,7 @@ func (db *DB) QueryFirst(querySQL string, args ...interface{}) (*Record, error) 
 		}
 		result, err := db.dbMgr.queryFirstWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 		if err == nil && result != nil {
-			GetCache().CacheSet(db.cacheName, key, result, getEffectiveTTL(db.cacheName, db.cacheTTL))
+			GetCache().CacheSet(db.cacheRepositoryName, key, result, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 		}
 		return result, err
 	}
@@ -402,9 +402,9 @@ func (db *DB) QueryMap(querySQL string, args ...interface{}) ([]map[string]inter
 	ctx, cancel := db.getContext()
 	defer cancel()
 
-	if db.cacheName != "" {
+	if db.cacheRepositoryName != "" {
 		key := GenerateCacheKey(db.dbMgr.name, querySQL, args...)
-		if val, ok := GetCache().CacheGet(db.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
 			var results []map[string]interface{}
 			if convertCacheValue(val, &results) {
 				return results, nil
@@ -412,7 +412,7 @@ func (db *DB) QueryMap(querySQL string, args ...interface{}) ([]map[string]inter
 		}
 		results, err := db.dbMgr.queryMapWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 		if err == nil {
-			GetCache().CacheSet(db.cacheName, key, results, getEffectiveTTL(db.cacheName, db.cacheTTL))
+			GetCache().CacheSet(db.cacheRepositoryName, key, results, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 		}
 		return results, err
 	}
@@ -550,9 +550,9 @@ func (db *DB) Count(table string, whereSql string, whereArgs ...interface{}) (in
 	if db.lastErr != nil {
 		return 0, db.lastErr
 	}
-	if db.cacheName != "" {
+	if db.cacheRepositoryName != "" {
 		key := GenerateCacheKey(db.dbMgr.name, "COUNT:"+table+":"+whereSql, whereArgs...)
-		if val, ok := GetCache().CacheGet(db.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
 			var count int64
 			if convertCacheValue(val, &count) {
 				return count, nil
@@ -560,7 +560,7 @@ func (db *DB) Count(table string, whereSql string, whereArgs ...interface{}) (in
 		}
 		count, err := db.dbMgr.count(db.dbMgr.getDB(), table, whereSql, whereArgs...)
 		if err == nil {
-			GetCache().CacheSet(db.cacheName, key, count, getEffectiveTTL(db.cacheName, db.cacheTTL))
+			GetCache().CacheSet(db.cacheRepositoryName, key, count, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 		}
 		return count, err
 	}
@@ -605,9 +605,9 @@ func (db *DB) PaginateBuilder(page int, pageSize int, selectSql string, table st
 		querySQL += " ORDER BY " + orderBySql
 	}
 
-	if db.cacheName != "" {
+	if db.cacheRepositoryName != "" {
 		key := GenerateCacheKey(db.dbMgr.name, "PAGINATE:"+querySQL, args...)
-		if val, ok := GetCache().CacheGet(db.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
@@ -616,7 +616,7 @@ func (db *DB) PaginateBuilder(page int, pageSize int, selectSql string, table st
 		list, totalRow, err := db.dbMgr.paginate(db.dbMgr.getDB(), querySQL, page, pageSize, args...)
 		if err == nil {
 			pageObj := NewPage(list, page, pageSize, totalRow)
-			GetCache().CacheSet(db.cacheName, key, pageObj, getEffectiveTTL(db.cacheName, db.cacheTTL))
+			GetCache().CacheSet(db.cacheRepositoryName, key, pageObj, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 			return pageObj, nil
 		}
 		return nil, err
@@ -636,9 +636,9 @@ func (db *DB) Paginate(page int, pageSize int, querySQL string, args ...interfac
 		return nil, db.lastErr
 	}
 
-	if db.cacheName != "" {
+	if db.cacheRepositoryName != "" {
 		key := GenerateCacheKey(db.dbMgr.name, "PAGINATE_SQL:"+querySQL, args...)
-		if val, ok := GetCache().CacheGet(db.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
@@ -647,7 +647,7 @@ func (db *DB) Paginate(page int, pageSize int, querySQL string, args ...interfac
 		list, totalRow, err := db.dbMgr.paginate(db.dbMgr.getDB(), querySQL, page, pageSize, args...)
 		if err == nil {
 			pageObj := NewPage(list, page, pageSize, totalRow)
-			GetCache().CacheSet(db.cacheName, key, pageObj, getEffectiveTTL(db.cacheName, db.cacheTTL))
+			GetCache().CacheSet(db.cacheRepositoryName, key, pageObj, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 			return pageObj, nil
 		}
 		return nil, err
@@ -781,7 +781,7 @@ func (db *DB) Transaction(fn func(*Tx) error) (err error) {
 // --- Tx Methods (Operation within a transaction) ---
 
 func (tx *Tx) Cache(name string, ttl ...time.Duration) *Tx {
-	tx.cacheName = name
+	tx.cacheRepositoryName = name
 	if len(ttl) > 0 {
 		tx.cacheTTL = ttl[0]
 	} else {
@@ -820,9 +820,9 @@ func (tx *Tx) Query(querySQL string, args ...interface{}) ([]Record, error) {
 	ctx, cancel := tx.getContext()
 	defer cancel()
 
-	if tx.cacheName != "" {
+	if tx.cacheRepositoryName != "" {
 		key := GenerateCacheKey(tx.dbMgr.name, querySQL, args...)
-		if val, ok := GetCache().CacheGet(tx.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(tx.cacheRepositoryName, key); ok {
 			var results []Record
 			if convertCacheValue(val, &results) {
 				return results, nil
@@ -830,7 +830,7 @@ func (tx *Tx) Query(querySQL string, args ...interface{}) ([]Record, error) {
 		}
 		results, err := tx.dbMgr.queryWithContext(ctx, tx.tx, querySQL, args...)
 		if err == nil {
-			GetCache().CacheSet(tx.cacheName, key, results, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
+			GetCache().CacheSet(tx.cacheRepositoryName, key, results, getEffectiveTTL(tx.cacheRepositoryName, tx.cacheTTL))
 		}
 		return results, err
 	}
@@ -841,9 +841,9 @@ func (tx *Tx) QueryFirst(querySQL string, args ...interface{}) (*Record, error) 
 	ctx, cancel := tx.getContext()
 	defer cancel()
 
-	if tx.cacheName != "" {
+	if tx.cacheRepositoryName != "" {
 		key := GenerateCacheKey(tx.dbMgr.name, querySQL, args...)
-		if val, ok := GetCache().CacheGet(tx.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(tx.cacheRepositoryName, key); ok {
 			var result *Record
 			if convertCacheValue(val, &result) {
 				return result, nil
@@ -851,7 +851,7 @@ func (tx *Tx) QueryFirst(querySQL string, args ...interface{}) (*Record, error) 
 		}
 		result, err := tx.dbMgr.queryFirstWithContext(ctx, tx.tx, querySQL, args...)
 		if err == nil && result != nil {
-			GetCache().CacheSet(tx.cacheName, key, result, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
+			GetCache().CacheSet(tx.cacheRepositoryName, key, result, getEffectiveTTL(tx.cacheRepositoryName, tx.cacheTTL))
 		}
 		return result, err
 	}
@@ -881,9 +881,9 @@ func (tx *Tx) QueryMap(querySQL string, args ...interface{}) ([]map[string]inter
 	ctx, cancel := tx.getContext()
 	defer cancel()
 
-	if tx.cacheName != "" {
+	if tx.cacheRepositoryName != "" {
 		key := GenerateCacheKey(tx.dbMgr.name, querySQL, args...)
-		if val, ok := GetCache().CacheGet(tx.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(tx.cacheRepositoryName, key); ok {
 			var results []map[string]interface{}
 			if convertCacheValue(val, &results) {
 				return results, nil
@@ -891,7 +891,7 @@ func (tx *Tx) QueryMap(querySQL string, args ...interface{}) ([]map[string]inter
 		}
 		results, err := tx.dbMgr.queryMapWithContext(ctx, tx.tx, querySQL, args...)
 		if err == nil {
-			GetCache().CacheSet(tx.cacheName, key, results, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
+			GetCache().CacheSet(tx.cacheRepositoryName, key, results, getEffectiveTTL(tx.cacheRepositoryName, tx.cacheTTL))
 		}
 		return results, err
 	}
@@ -975,9 +975,9 @@ func (tx *Tx) BatchDeleteByIdsDefault(table string, ids []interface{}) (int64, e
 }
 
 func (tx *Tx) Count(table string, whereSql string, whereArgs ...interface{}) (int64, error) {
-	if tx.cacheName != "" {
+	if tx.cacheRepositoryName != "" {
 		key := GenerateCacheKey(tx.dbMgr.name, "COUNT:"+table+":"+whereSql, whereArgs...)
-		if val, ok := GetCache().CacheGet(tx.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(tx.cacheRepositoryName, key); ok {
 			var count int64
 			if convertCacheValue(val, &count) {
 				return count, nil
@@ -985,7 +985,7 @@ func (tx *Tx) Count(table string, whereSql string, whereArgs ...interface{}) (in
 		}
 		count, err := tx.dbMgr.count(tx.tx, table, whereSql, whereArgs...)
 		if err == nil {
-			GetCache().CacheSet(tx.cacheName, key, count, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
+			GetCache().CacheSet(tx.cacheRepositoryName, key, count, getEffectiveTTL(tx.cacheRepositoryName, tx.cacheTTL))
 		}
 		return count, err
 	}
@@ -1017,9 +1017,9 @@ func (tx *Tx) PaginateBuilder(page int, pageSize int, selectSql string, table st
 		querySQL += " ORDER BY " + orderBySql
 	}
 
-	if tx.cacheName != "" {
+	if tx.cacheRepositoryName != "" {
 		key := GenerateCacheKey(tx.dbMgr.name, "PAGINATE:"+querySQL, args...)
-		if val, ok := GetCache().CacheGet(tx.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(tx.cacheRepositoryName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
@@ -1028,7 +1028,7 @@ func (tx *Tx) PaginateBuilder(page int, pageSize int, selectSql string, table st
 		list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, args...)
 		if err == nil {
 			pageObj := NewPage(list, page, pageSize, totalRow)
-			GetCache().CacheSet(tx.cacheName, key, pageObj, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
+			GetCache().CacheSet(tx.cacheRepositoryName, key, pageObj, getEffectiveTTL(tx.cacheRepositoryName, tx.cacheTTL))
 			return pageObj, nil
 		}
 		return nil, err
@@ -1044,9 +1044,9 @@ func (tx *Tx) PaginateBuilder(page int, pageSize int, selectSql string, table st
 // Paginate 事务分页方法，使用完整SQL语句进行分页查询
 // 在事务上下文中自动解析SQL并根据数据库类型生成相应的分页语句
 func (tx *Tx) Paginate(page int, pageSize int, querySQL string, args ...interface{}) (*Page[Record], error) {
-	if tx.cacheName != "" {
+	if tx.cacheRepositoryName != "" {
 		key := GenerateCacheKey(tx.dbMgr.name, "PAGINATE_SQL:"+querySQL, args...)
-		if val, ok := GetCache().CacheGet(tx.cacheName, key); ok {
+		if val, ok := GetCache().CacheGet(tx.cacheRepositoryName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
@@ -1055,7 +1055,7 @@ func (tx *Tx) Paginate(page int, pageSize int, querySQL string, args ...interfac
 		list, totalRow, err := tx.dbMgr.paginate(tx.tx, querySQL, page, pageSize, args...)
 		if err == nil {
 			pageObj := NewPage(list, page, pageSize, totalRow)
-			GetCache().CacheSet(tx.cacheName, key, pageObj, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
+			GetCache().CacheSet(tx.cacheRepositoryName, key, pageObj, getEffectiveTTL(tx.cacheRepositoryName, tx.cacheTTL))
 			return pageObj, nil
 		}
 		return nil, err
@@ -1123,41 +1123,98 @@ func (tx *Tx) Rollback() error {
 	return tx.tx.Rollback()
 }
 
+// convertCacheValue 将缓存值转换为目标类型
+// 优先使用类型断言（零开销），失败时才使用 JSON 序列化（兼容 RedisCache）
 func convertCacheValue(val interface{}, dest interface{}) bool {
 	if val == nil {
 		return false
 	}
 
-	// 1. Try direct type assertion first (for LocalCache)
+	// 1. 优先尝试直接类型断言（LocalCache 零开销路径）
 	switch d := dest.(type) {
 	case *[]Record:
+		// 处理 []Record
 		if v, ok := val.([]Record); ok {
 			*d = v
 			return true
 		}
+		// 处理 []*Record -> []Record 的转换
+		// 注意：Record 包含 mutex，不能直接解引用拷贝
+		// 这种情况应该保持指针形式或使用 JSON 序列化
+		if _, ok := val.([]*Record); ok {
+			// 降级到 JSON 序列化处理
+			break
+		}
+
+	case *[]*Record:
+		// 处理 []*Record
+		if v, ok := val.([]*Record); ok {
+			*d = v
+			return true
+		}
+		// []Record -> []*Record 的转换
+		// 由于 Record 包含 mutex，不能直接拷贝，降级到 JSON 序列化
+		if _, ok := val.([]Record); ok {
+			break
+		}
+
 	case **Record:
+		// 处理 *Record
 		if v, ok := val.(*Record); ok {
 			*d = v
 			return true
 		}
+
 	case *[]map[string]interface{}:
+		// 处理 []map[string]interface{}
 		if v, ok := val.([]map[string]interface{}); ok {
 			*d = v
 			return true
 		}
+
 	case *int64:
+		// 处理 int64
 		if v, ok := val.(int64); ok {
 			*d = v
 			return true
 		}
+		// 处理其他整数类型
+		if v, ok := val.(int); ok {
+			*d = int64(v)
+			return true
+		}
+		if v, ok := val.(int32); ok {
+			*d = int64(v)
+			return true
+		}
+
+	case *int:
+		// 处理 int
+		if v, ok := val.(int); ok {
+			*d = v
+			return true
+		}
+		if v, ok := val.(int64); ok {
+			*d = int(v)
+			return true
+		}
+
 	case **Page[Record]:
+		// 处理 *Page[Record]
 		if v, ok := val.(*Page[Record]); ok {
 			*d = v
 			return true
 		}
 	}
 
-	// 2. Try JSON conversion (for RedisCache)
+	// 2. 处理 RedisCache 返回的 JSON 字节数组（优化路径）
+	if jsonBytes, ok := val.([]byte); ok {
+		// 直接从字节数组反序列化，避免字符串转换
+		return json.Unmarshal(jsonBytes, dest) == nil
+	}
+
+	// 3. 降级到 JSON 转换（用于其他复杂类型）
+	// 注意：这是最后的手段，性能较差
 	data, err := json.Marshal(val)
 	if err != nil {
 		return false

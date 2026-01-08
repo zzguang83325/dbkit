@@ -184,10 +184,10 @@ func (mgr *ConcurrentPaginationManager) executePaginationQuery(
 	defer cancel()
 
 	var totalRow int64
-	if db.cacheName != "" {
+	if db.cacheRepositoryName != "" {
 		// 使用线程安全的缓存键生成
 		countKey := GenerateCountCacheKey(db.dbMgr.name, parsedSQL, args...)
-		if val, ok := GetCache().CacheGet(db.cacheName, countKey); ok {
+		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, countKey); ok {
 			if convertCacheValue(val, &totalRow) {
 				// 缓存命中，继续执行分页查询
 			} else {
@@ -215,7 +215,7 @@ func (mgr *ConcurrentPaginationManager) executePaginationQuery(
 						break
 					}
 				}
-				GetCache().CacheSet(db.cacheName, countKey, totalRow, getEffectiveTTL(db.cacheName, db.cacheTTL))
+				GetCache().CacheSet(db.cacheRepositoryName, countKey, totalRow, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 			}
 		} else {
 			// 缓存未命中，执行查询
@@ -242,7 +242,7 @@ func (mgr *ConcurrentPaginationManager) executePaginationQuery(
 					break
 				}
 			}
-			GetCache().CacheSet(db.cacheName, countKey, totalRow, getEffectiveTTL(db.cacheName, db.cacheTTL))
+			GetCache().CacheSet(db.cacheRepositoryName, countKey, totalRow, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 		}
 	} else {
 		// 不使用缓存
@@ -281,10 +281,10 @@ func (mgr *ConcurrentPaginationManager) executePaginationQuery(
 
 	// 执行分页查询
 	var list []Record
-	if db.cacheName != "" {
+	if db.cacheRepositoryName != "" {
 		// 使用线程安全的缓存键生成
 		paginationKey := GeneratePaginationCacheKey(db.dbMgr.name, parsedSQL, page, pageSize, args...)
-		if val, ok := GetCache().CacheGet(db.cacheName, paginationKey); ok {
+		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, paginationKey); ok {
 			if convertCacheValue(val, &list) {
 				// 缓存命中，直接返回结果
 				return NewPage(list, page, pageSize, totalRow), nil
@@ -298,7 +298,7 @@ func (mgr *ConcurrentPaginationManager) executePaginationQuery(
 		}
 
 		// 将结果存入缓存
-		GetCache().CacheSet(db.cacheName, paginationKey, list, getEffectiveTTL(db.cacheName, db.cacheTTL))
+		GetCache().CacheSet(db.cacheRepositoryName, paginationKey, list, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 		return NewPage(list, page, pageSize, totalRow), nil
 	} else {
 		// 不使用缓存
@@ -326,10 +326,10 @@ func (mgr *ConcurrentPaginationManager) executePaginationQueryTx(
 	defer cancel()
 
 	var totalRow int64
-	if tx.cacheName != "" {
+	if tx.cacheRepositoryName != "" {
 		// 使用线程安全的缓存键生成
 		countKey := GenerateCountCacheKey(tx.dbMgr.name, parsedSQL, args...)
-		if val, ok := GetCache().CacheGet(tx.cacheName, countKey); ok {
+		if val, ok := GetCache().CacheGet(tx.cacheRepositoryName, countKey); ok {
 			if convertCacheValue(val, &totalRow) {
 				// 缓存命中，继续执行分页查询
 			} else {
@@ -357,7 +357,7 @@ func (mgr *ConcurrentPaginationManager) executePaginationQueryTx(
 						break
 					}
 				}
-				GetCache().CacheSet(tx.cacheName, countKey, totalRow, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
+				GetCache().CacheSet(tx.cacheRepositoryName, countKey, totalRow, getEffectiveTTL(tx.cacheRepositoryName, tx.cacheTTL))
 			}
 		} else {
 			// 缓存未命中，执行查询
@@ -384,7 +384,7 @@ func (mgr *ConcurrentPaginationManager) executePaginationQueryTx(
 					break
 				}
 			}
-			GetCache().CacheSet(tx.cacheName, countKey, totalRow, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
+			GetCache().CacheSet(tx.cacheRepositoryName, countKey, totalRow, getEffectiveTTL(tx.cacheRepositoryName, tx.cacheTTL))
 		}
 	} else {
 		// 不使用缓存
@@ -423,10 +423,10 @@ func (mgr *ConcurrentPaginationManager) executePaginationQueryTx(
 
 	// 执行分页查询（在事务上下文中）
 	var list []Record
-	if tx.cacheName != "" {
+	if tx.cacheRepositoryName != "" {
 		// 使用线程安全的缓存键生成
 		paginationKey := GeneratePaginationCacheKey(tx.dbMgr.name, parsedSQL, page, pageSize, args...)
-		if val, ok := GetCache().CacheGet(tx.cacheName, paginationKey); ok {
+		if val, ok := GetCache().CacheGet(tx.cacheRepositoryName, paginationKey); ok {
 			if convertCacheValue(val, &list) {
 				// 缓存命中，直接返回结果
 				return NewPage(list, page, pageSize, totalRow), nil
@@ -440,7 +440,7 @@ func (mgr *ConcurrentPaginationManager) executePaginationQueryTx(
 		}
 
 		// 将结果存入缓存
-		GetCache().CacheSet(tx.cacheName, paginationKey, list, getEffectiveTTL(tx.cacheName, tx.cacheTTL))
+		GetCache().CacheSet(tx.cacheRepositoryName, paginationKey, list, getEffectiveTTL(tx.cacheRepositoryName, tx.cacheTTL))
 		return NewPage(list, page, pageSize, totalRow), nil
 	} else {
 		// 不使用缓存

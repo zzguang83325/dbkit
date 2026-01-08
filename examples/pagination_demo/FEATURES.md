@@ -187,8 +187,8 @@ querySQL := `
 // 生成器会自动为模型添加 PaginateSQL 方法
 func (m *User) PaginateSQL(page int, pageSize int, querySQL string, args ...interface{}) (*dbkit.Page[*User], error) {
     db := dbkit.Use(m.DatabaseName())
-    if cache := m.GetCache(); cache != nil && cache.CacheName != "" {
-        db = db.Cache(cache.CacheName, cache.CacheTTL)
+    if cache := m.GetCache(); cache != nil && cache.CacheRepositoryName != "" {
+        db = db.Cache(cache.CacheRepositoryName, cache.CacheTTL)
     }
     recordsPage, err := db.PaginateSQL(page, pageSize, querySQL, args...)
     if err != nil {

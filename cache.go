@@ -10,10 +10,10 @@ import (
 
 // CacheProvider interface defines the behavior of a cache provider
 type CacheProvider interface {
-	CacheGet(cacheName, key string) (interface{}, bool)
-	CacheSet(cacheName, key string, value interface{}, ttl time.Duration)
-	CacheDelete(cacheName, key string)
-	CacheClear(cacheName string)
+	CacheGet(cacheRepositoryName, key string) (interface{}, bool)
+	CacheSet(cacheRepositoryName, key string, value interface{}, ttl time.Duration)
+	CacheDelete(cacheRepositoryName, key string)
+	CacheClear(cacheRepositoryName string)
 	Status() map[string]interface{}
 }
 
@@ -33,7 +33,7 @@ func (e cacheEntry) isExpired() bool {
 
 // localCache implements CacheProvider using in-memory storage
 type localCache struct {
-	stores          sync.Map // map[string]*sync.Map (cacheName -> map[key]cacheEntry)
+	stores          sync.Map // map[string]*sync.Map (cacheRepositoryName -> map[key]cacheEntry)
 	cleanupInterval time.Duration
 }
 
@@ -73,8 +73,8 @@ func (lc *localCache) cleanupExpired() {
 	})
 }
 
-func (lc *localCache) CacheGet(cacheName, key string) (interface{}, bool) {
-	if store, ok := lc.stores.Load(cacheName); ok {
+func (lc *localCache) CacheGet(cacheRepositoryName, key string) (interface{}, bool) {
+	if store, ok := lc.stores.Load(cacheRepositoryName); ok {
 		if entry, ok := store.(*sync.Map).Load(key); ok {
 			e := entry.(cacheEntry)
 			if !e.isExpired() {
@@ -87,8 +87,8 @@ func (lc *localCache) CacheGet(cacheName, key string) (interface{}, bool) {
 	return nil, false
 }
 
-func (lc *localCache) CacheSet(cacheName, key string, value interface{}, ttl time.Duration) {
-	store, _ := lc.stores.LoadOrStore(cacheName, &sync.Map{})
+func (lc *localCache) CacheSet(cacheRepositoryName, key string, value interface{}, ttl time.Duration) {
+	store, _ := lc.stores.LoadOrStore(cacheRepositoryName, &sync.Map{})
 	var expiration time.Time
 	if ttl > 0 {
 		expiration = time.Now().Add(ttl)
@@ -100,14 +100,14 @@ func (lc *localCache) CacheSet(cacheName, key string, value interface{}, ttl tim
 	})
 }
 
-func (lc *localCache) CacheDelete(cacheName, key string) {
-	if store, ok := lc.stores.Load(cacheName); ok {
+func (lc *localCache) CacheDelete(cacheRepositoryName, key string) {
+	if store, ok := lc.stores.Load(cacheRepositoryName); ok {
 		store.(*sync.Map).Delete(key)
 	}
 }
 
-func (lc *localCache) CacheClear(cacheName string) {
-	lc.stores.Delete(cacheName)
+func (lc *localCache) CacheClear(cacheRepositoryName string) {
+	lc.stores.Delete(cacheRepositoryName)
 }
 
 func (lc *localCache) Status() map[string]interface{} {
@@ -216,7 +216,7 @@ func formatBytes(b int64) string {
 var (
 	defaultCache CacheProvider = newLocalCache(1 * time.Minute)
 	defaultTTL   time.Duration = time.Minute
-	cacheConfigs sync.Map      // map[cacheName]time.Duration
+	cacheConfigs sync.Map      // map[cacheRepositoryName]time.Duration
 	cacheMu      sync.RWMutex
 	cleanupOnce  sync.Once
 )
@@ -250,35 +250,35 @@ func SetDefaultTtl(ttl time.Duration) {
 }
 
 // CreateCache pre-configures a cache store with a specific TTL
-func CreateCache(cacheName string, ttl time.Duration) {
-	cacheConfigs.Store(cacheName, ttl)
+func CreateCache(cacheRepositoryName string, ttl time.Duration) {
+	cacheConfigs.Store(cacheRepositoryName, ttl)
 }
 
 // CacheSet stores a value in a specific cache store
-func CacheSet(cacheName, key string, value interface{}, ttl ...time.Duration) {
+func CacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration) {
 	expiration := defaultTTL
 	if len(ttl) > 0 {
 		expiration = ttl[0]
-	} else if configTTL, ok := cacheConfigs.Load(cacheName); ok {
+	} else if configTTL, ok := cacheConfigs.Load(cacheRepositoryName); ok {
 		expiration = configTTL.(time.Duration)
 	}
 
-	defaultCache.CacheSet(cacheName, key, value, expiration)
+	defaultCache.CacheSet(cacheRepositoryName, key, value, expiration)
 }
 
 // CacheGet retrieves a value from a specific cache store
-func CacheGet(cacheName, key string) (interface{}, bool) {
-	return defaultCache.CacheGet(cacheName, key)
+func CacheGet(cacheRepositoryName, key string) (interface{}, bool) {
+	return defaultCache.CacheGet(cacheRepositoryName, key)
 }
 
 // CacheDelete removes a specific key from a cache store
-func CacheDelete(cacheName, key string) {
-	defaultCache.CacheDelete(cacheName, key)
+func CacheDelete(cacheRepositoryName, key string) {
+	defaultCache.CacheDelete(cacheRepositoryName, key)
 }
 
 // CacheClear clears all keys from a cache store
-func CacheClear(cacheName string) {
-	defaultCache.CacheClear(cacheName)
+func CacheClear(cacheRepositoryName string) {
+	defaultCache.CacheClear(cacheRepositoryName)
 }
 
 // CacheStatus returns the current cache provider's status
@@ -438,11 +438,11 @@ func GenerateCountCacheKey(dbName string, parsedSQL *ParsedSQL, args ...interfac
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func getEffectiveTTL(cacheName string, customTTL time.Duration) time.Duration {
+func getEffectiveTTL(cacheRepositoryName string, customTTL time.Duration) time.Duration {
 	if customTTL >= 0 {
 		return customTTL
 	}
-	if configTTL, ok := cacheConfigs.Load(cacheName); ok {
+	if configTTL, ok := cacheConfigs.Load(cacheRepositoryName); ok {
 		return configTTL.(time.Duration)
 	}
 	return defaultTTL

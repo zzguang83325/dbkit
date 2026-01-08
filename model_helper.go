@@ -14,13 +14,13 @@ var (
 
 // ModelCache 用于在 Model 中存储缓存配置，可嵌入到生成的 Model 中
 type ModelCache struct {
-	CacheName string
-	CacheTTL  time.Duration
+	CacheRepositoryName string
+	CacheTTL            time.Duration
 }
 
 // SetCache 设置缓存名称和TTL
-func (c *ModelCache) SetCache(name string, ttl ...time.Duration) {
-	c.CacheName = name
+func (c *ModelCache) SetCache(cacheRepositoryName string, ttl ...time.Duration) {
+	c.CacheRepositoryName = cacheRepositoryName
 	if len(ttl) > 0 {
 		c.CacheTTL = ttl[0]
 	} else {
@@ -30,7 +30,7 @@ func (c *ModelCache) SetCache(name string, ttl ...time.Duration) {
 
 // GetCache 获取缓存配置，如果未设置则返回 nil
 func (c *ModelCache) GetCache() *ModelCache {
-	if c.CacheName == "" {
+	if c.CacheRepositoryName == "" {
 		return nil
 	}
 	return c
@@ -40,8 +40,8 @@ func (c *ModelCache) GetCache() *ModelCache {
 func FindModel[T IDbModel](model T, cache *ModelCache, whereSql, orderBySql string, whereArgs ...interface{}) ([]T, error) {
 	var results []T
 	db := Use(model.DatabaseName())
-	if cache != nil && cache.CacheName != "" {
-		db = db.Cache(cache.CacheName, cache.CacheTTL)
+	if cache != nil && cache.CacheRepositoryName != "" {
+		db = db.Cache(cache.CacheRepositoryName, cache.CacheTTL)
 	}
 	err := db.Table(model.TableName()).Where(whereSql, whereArgs...).OrderBy(orderBySql).FindToDbModel(&results)
 	return results, err
@@ -50,8 +50,8 @@ func FindModel[T IDbModel](model T, cache *ModelCache, whereSql, orderBySql stri
 // FindFirstModel 查询第一条记录并映射到 DbModel
 func FindFirstModel[T IDbModel](model T, cache *ModelCache, whereSql string, whereArgs ...interface{}) (T, error) {
 	db := Use(model.DatabaseName())
-	if cache != nil && cache.CacheName != "" {
-		db = db.Cache(cache.CacheName, cache.CacheTTL)
+	if cache != nil && cache.CacheRepositoryName != "" {
+		db = db.Cache(cache.CacheRepositoryName, cache.CacheTTL)
 	}
 	err := db.Table(model.TableName()).Where(whereSql, whereArgs...).FindFirstToDbModel(model)
 	return model, err
@@ -60,8 +60,8 @@ func FindFirstModel[T IDbModel](model T, cache *ModelCache, whereSql string, whe
 // PaginateModel 分页查询并映射到 DbModel
 func PaginateModel[T IDbModel](model T, cache *ModelCache, page, pageSize int, whereSql, orderBySql string, whereArgs ...interface{}) (*Page[T], error) {
 	db := Use(model.DatabaseName())
-	if cache != nil && cache.CacheName != "" {
-		db = db.Cache(cache.CacheName, cache.CacheTTL)
+	if cache != nil && cache.CacheRepositoryName != "" {
+		db = db.Cache(cache.CacheRepositoryName, cache.CacheTTL)
 	}
 	recordsPage, err := db.Table(model.TableName()).Where(whereSql, whereArgs...).OrderBy(orderBySql).Paginate(page, pageSize)
 	if err != nil {
@@ -72,8 +72,8 @@ func PaginateModel[T IDbModel](model T, cache *ModelCache, page, pageSize int, w
 
 func PaginateModel_FullSql[T IDbModel](model T, cache *ModelCache, page, pageSize int, querySQL string, whereArgs ...interface{}) (*Page[T], error) {
 	db := Use(model.DatabaseName())
-	if cache != nil && cache.CacheName != "" {
-		db = db.Cache(cache.CacheName, cache.CacheTTL)
+	if cache != nil && cache.CacheRepositoryName != "" {
+		db = db.Cache(cache.CacheRepositoryName, cache.CacheTTL)
 	}
 	recordsPage, err := db.Paginate(page, pageSize, querySQL, whereArgs...)
 	if err != nil {
@@ -144,8 +144,8 @@ func RestoreModel(model IDbModel) (int64, error) {
 func FindModelWithTrashed[T IDbModel](model T, cache *ModelCache, whereSql, orderBySql string, whereArgs ...interface{}) ([]T, error) {
 	var results []T
 	db := Use(model.DatabaseName())
-	if cache != nil && cache.CacheName != "" {
-		db = db.Cache(cache.CacheName, cache.CacheTTL)
+	if cache != nil && cache.CacheRepositoryName != "" {
+		db = db.Cache(cache.CacheRepositoryName, cache.CacheTTL)
 	}
 	err := db.Table(model.TableName()).WithTrashed().Where(whereSql, whereArgs...).OrderBy(orderBySql).FindToDbModel(&results)
 	return results, err
@@ -155,8 +155,8 @@ func FindModelWithTrashed[T IDbModel](model T, cache *ModelCache, whereSql, orde
 func FindModelOnlyTrashed[T IDbModel](model T, cache *ModelCache, whereSql, orderBySql string, whereArgs ...interface{}) ([]T, error) {
 	var results []T
 	db := Use(model.DatabaseName())
-	if cache != nil && cache.CacheName != "" {
-		db = db.Cache(cache.CacheName, cache.CacheTTL)
+	if cache != nil && cache.CacheRepositoryName != "" {
+		db = db.Cache(cache.CacheRepositoryName, cache.CacheTTL)
 	}
 	err := db.Table(model.TableName()).OnlyTrashed().Where(whereSql, whereArgs...).OrderBy(orderBySql).FindToDbModel(&results)
 	return results, err
