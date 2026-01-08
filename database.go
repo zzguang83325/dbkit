@@ -1474,11 +1474,28 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 	var totalAffected int64
 	driver := mgr.config.Driver
 
+	// Extract and sort columns once for all batches
+	firstRecord := records[0]
+	firstRecord.mu.RLock()
 	var columns []string
-	for col := range records[0].columns {
+	for col := range firstRecord.columns {
 		columns = append(columns, col)
 	}
+	firstRecord.mu.RUnlock()
 	sort.Strings(columns)
+
+	numCols := len(columns)
+	colNamesJoined := joinStrings(columns)
+
+	// Pre-generate row placeholders for drivers that support multi-row INSERT
+	var rowPlaceholder string
+	if driver != PostgreSQL && driver != SQLServer && driver != Oracle {
+		placeholders := make([]string, numCols)
+		for i := range placeholders {
+			placeholders[i] = "?"
+		}
+		rowPlaceholder = "(" + joinStrings(placeholders) + ")"
+	}
 
 	for i := 0; i < len(records); i += batchSize {
 		end := i + batchSize
@@ -1487,48 +1504,58 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 		}
 
 		batch := records[i:end]
-		var allValues [][]interface{}
-		for _, record := range batch {
-			var values []interface{}
-			for _, col := range columns {
-				values = append(values, record.columns[col])
-			}
-			allValues = append(allValues, values)
-		}
+		batchLen := len(batch)
 
 		var querySQL string
 		var flatArgs []interface{}
 
 		if driver == PostgreSQL {
-			var allPlaceholders []string
-			for rowIdx, values := range allValues {
-				var rowPlaceholders []string
-				for colIdx := range columns {
-					placeholderIdx := rowIdx*len(columns) + colIdx + 1
-					rowPlaceholders = append(rowPlaceholders, fmt.Sprintf("$%d", placeholderIdx))
+			flatArgs = make([]interface{}, 0, batchLen*numCols)
+			var sb strings.Builder
+			sb.WriteString("INSERT INTO ")
+			sb.WriteString(table)
+			sb.WriteString(" (")
+			sb.WriteString(colNamesJoined)
+			sb.WriteString(") VALUES ")
+
+			for rowIdx, record := range batch {
+				if rowIdx > 0 {
+					sb.WriteString(", ")
 				}
-				allPlaceholders = append(allPlaceholders, fmt.Sprintf("(%s)", joinStrings(rowPlaceholders)))
-				flatArgs = append(flatArgs, values...)
+				sb.WriteString("(")
+				record.mu.RLock()
+				for colIdx, col := range columns {
+					if colIdx > 0 {
+						sb.WriteString(", ")
+					}
+					placeholderIdx := rowIdx*numCols + colIdx + 1
+					sb.WriteString("$")
+					sb.WriteString(strconv.Itoa(placeholderIdx))
+					flatArgs = append(flatArgs, record.columns[col])
+				}
+				record.mu.RUnlock()
+				sb.WriteString(")")
 			}
-			querySQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", table, joinStrings(columns), joinStrings(allPlaceholders))
+			querySQL = sb.String()
 		} else if driver == SQLServer || driver == Oracle {
-			// 使用预处理语句优化批量插入性能
-			// 预编译一次 SQL，复用执行多条记录
+			// SQLServer/Oracle often perform better with prepared statements for batching
 			var placeholders []string
 			for range columns {
 				placeholders = append(placeholders, "?")
 			}
-			querySQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, joinStrings(columns), joinStrings(placeholders))
+			querySQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, colNamesJoined, joinStrings(placeholders))
 			querySQL = mgr.convertPlaceholder(querySQL, driver)
 
-			// 尝试使用预处理语句
 			if preparer, ok := executor.(interface {
 				Prepare(query string) (*sql.Stmt, error)
 			}); ok {
 				stmt, err := preparer.Prepare(querySQL)
 				if err != nil {
-					// 预处理失败，回退到单条执行
-					for _, values := range allValues {
+					for _, record := range batch {
+						values := make([]interface{}, numCols)
+						for j, col := range columns {
+							values[j] = record.getValue(col)
+						}
 						values = mgr.sanitizeArgs(querySQL, values)
 						start := time.Now()
 						result, err := executor.Exec(querySQL, values...)
@@ -1543,8 +1570,11 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 				}
 				defer stmt.Close()
 
-				// 使用预处理语句批量执行
-				for _, values := range allValues {
+				for _, record := range batch {
+					values := make([]interface{}, numCols)
+					for j, col := range columns {
+						values[j] = record.getValue(col)
+					}
 					values = mgr.sanitizeArgs(querySQL, values)
 					start := time.Now()
 					result, err := stmt.Exec(values...)
@@ -1556,8 +1586,11 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 					totalAffected += affected
 				}
 			} else {
-				// 不支持 Prepare，回退到单条执行
-				for _, values := range allValues {
+				for _, record := range batch {
+					values := make([]interface{}, numCols)
+					for j, col := range columns {
+						values[j] = record.getValue(col)
+					}
 					values = mgr.sanitizeArgs(querySQL, values)
 					start := time.Now()
 					result, err := executor.Exec(querySQL, values...)
@@ -1571,18 +1604,27 @@ func (mgr *dbManager) batchInsert(executor sqlExecutor, table string, records []
 			}
 			continue
 		} else {
-			var valueLists []string
-			var placeholders []string
-			for range columns {
-				placeholders = append(placeholders, "?")
+			// MySQL, SQLite and others
+			flatArgs = make([]interface{}, 0, batchLen*numCols)
+			var sb strings.Builder
+			sb.WriteString("INSERT INTO ")
+			sb.WriteString(table)
+			sb.WriteString(" (")
+			sb.WriteString(colNamesJoined)
+			sb.WriteString(") VALUES ")
+
+			for rowIdx, record := range batch {
+				if rowIdx > 0 {
+					sb.WriteString(", ")
+				}
+				sb.WriteString(rowPlaceholder)
+				record.mu.RLock()
+				for _, col := range columns {
+					flatArgs = append(flatArgs, record.columns[col])
+				}
+				record.mu.RUnlock()
 			}
-			for range batch {
-				valueLists = append(valueLists, fmt.Sprintf("(%s)", joinStrings(placeholders)))
-			}
-			for _, values := range allValues {
-				flatArgs = append(flatArgs, values...)
-			}
-			querySQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", table, joinStrings(columns), joinStrings(valueLists))
+			querySQL = sb.String()
 		}
 
 		start := time.Now()
@@ -1615,7 +1657,57 @@ func (mgr *dbManager) batchUpdate(executor sqlExecutor, table string, records []
 		return 0, fmt.Errorf("table %s has no primary key, cannot use BatchUpdate", table)
 	}
 
+	// Extract update columns from first record (excluding PKs)
+	firstRecord := records[0]
+	firstRecord.mu.RLock()
+	var updateCols []string
+	for col := range firstRecord.columns {
+		isPK := false
+		for _, pk := range pks {
+			if strings.EqualFold(col, pk) {
+				isPK = true
+				break
+			}
+		}
+		if !isPK {
+			updateCols = append(updateCols, col)
+		}
+	}
+	firstRecord.mu.RUnlock()
+
+	if len(updateCols) == 0 {
+		return 0, nil // Nothing to update besides PKs
+	}
+
+	// Build UPDATE SQL once
+	var setClauses []string
+	for _, col := range updateCols {
+		setClauses = append(setClauses, fmt.Sprintf("%s = ?", col))
+	}
+	var whereClauses []string
+	for _, pk := range pks {
+		whereClauses = append(whereClauses, fmt.Sprintf("%s = ?", pk))
+	}
+
+	querySQL := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
+		table, joinStrings(setClauses), joinStrings(whereClauses))
+	querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
+
 	var totalAffected int64
+	numUpdateCols := len(updateCols)
+	numPKs := len(pks)
+	numTotalArgs := numUpdateCols + numPKs
+
+	// Try to use prepared statement for all batches
+	var stmt *sql.Stmt
+	if preparer, ok := executor.(interface {
+		Prepare(query string) (*sql.Stmt, error)
+	}); ok {
+		stmt, _ = preparer.Prepare(querySQL)
+	}
+	if stmt != nil {
+		defer stmt.Close()
+	}
 
 	// 分批处理
 	for i := 0; i < len(records); i += batchSize {
@@ -1623,97 +1715,36 @@ func (mgr *dbManager) batchUpdate(executor sqlExecutor, table string, records []
 		if end > len(records) {
 			end = len(records)
 		}
-
 		batch := records[i:end]
 
-		// 使用预处理语句优化批量更新
-		if len(batch) > 0 {
-			// 获取第一条记录的列（排除主键）
-			columns, _ := mgr.getOrderedColumns(batch[0])
-			var updateCols []string
-			for _, col := range columns {
-				isPK := false
-				for _, pk := range pks {
-					if strings.EqualFold(col, pk) {
-						isPK = true
-						break
-					}
-				}
-				if !isPK {
-					updateCols = append(updateCols, col)
-				}
+		for _, record := range batch {
+			values := make([]interface{}, numTotalArgs)
+			record.mu.RLock()
+			// SET values
+			for j, col := range updateCols {
+				values[j] = record.columns[col]
 			}
-
-			if len(updateCols) == 0 {
-				continue // 只有主键，无需更新
+			// WHERE values (PKs)
+			for j, pk := range pks {
+				values[numUpdateCols+j] = record.columns[pk]
 			}
+			record.mu.RUnlock()
 
-			// 构建 UPDATE SQL
-			var setClauses []string
-			for _, col := range updateCols {
-				setClauses = append(setClauses, fmt.Sprintf("%s = ?", col))
+			start := time.Now()
+			var result sql.Result
+			var err error
+			if stmt != nil {
+				result, err = stmt.Exec(values...)
+			} else {
+				sanitizedValues := mgr.sanitizeArgs(querySQL, values)
+				result, err = executor.Exec(querySQL, sanitizedValues...)
 			}
-
-			var whereClauses []string
-			for _, pk := range pks {
-				whereClauses = append(whereClauses, fmt.Sprintf("%s = ?", pk))
+			mgr.logTrace(start, querySQL, values, err)
+			if err != nil {
+				return totalAffected, err
 			}
-
-			querySQL := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
-				table, strings.Join(setClauses, ", "), strings.Join(whereClauses, " AND "))
-			querySQL = mgr.convertPlaceholder(querySQL, mgr.config.Driver)
-
-			// 尝试使用预处理语句
-			if preparer, ok := executor.(interface {
-				Prepare(query string) (*sql.Stmt, error)
-			}); ok {
-				stmt, err := preparer.Prepare(querySQL)
-				if err == nil {
-					defer stmt.Close()
-
-					for _, record := range batch {
-						var values []interface{}
-						// 先添加 SET 子句的值
-						for _, col := range updateCols {
-							values = append(values, record.Get(col))
-						}
-						// 再添加 WHERE 子句的值（主键）
-						for _, pk := range pks {
-							values = append(values, record.Get(pk))
-						}
-
-						start := time.Now()
-						result, err := stmt.Exec(values...)
-						mgr.logTrace(start, querySQL, values, err)
-						if err != nil {
-							return totalAffected, err
-						}
-						affected, _ := result.RowsAffected()
-						totalAffected += affected
-					}
-					continue
-				}
-			}
-
-			// 回退到单条执行
-			for _, record := range batch {
-				var values []interface{}
-				for _, col := range updateCols {
-					values = append(values, record.Get(col))
-				}
-				for _, pk := range pks {
-					values = append(values, record.Get(pk))
-				}
-
-				start := time.Now()
-				result, err := executor.Exec(querySQL, values...)
-				mgr.logTrace(start, querySQL, values, err)
-				if err != nil {
-					return totalAffected, err
-				}
-				affected, _ := result.RowsAffected()
-				totalAffected += affected
-			}
+			affected, _ := result.RowsAffected()
+			totalAffected += affected
 		}
 	}
 
@@ -1998,52 +2029,47 @@ func scanRows(rows *sql.Rows) ([]map[string]interface{}, error) {
 		return nil, err
 	}
 
+	numCols := len(columns)
 	var results []map[string]interface{}
-	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range columns {
-			valuePtrs[i] = &values[i]
-		}
+	// Reuse slices for each row to reduce allocations
+	values := make([]interface{}, numCols)
+	valuePtrs := make([]interface{}, numCols)
+	for i := range columns {
+		valuePtrs[i] = &values[i]
+	}
 
+	for rows.Next() {
 		if err := rows.Scan(valuePtrs...); err != nil {
 			return nil, err
 		}
 
-		entry := make(map[string]interface{})
+		entry := make(map[string]interface{}, numCols)
 		for i, col := range columns {
 			val := values[i]
 
 			// Handle []byte conversion for numeric/decimal types
 			if b, ok := val.([]byte); ok {
-				// Get database type info
 				dbType := strings.ToUpper(columnTypes[i].DatabaseTypeName())
 
-				// Check if it's a numeric type that should be a string or number
-				// Common numeric types across DBs: DECIMAL, NUMERIC, NUMBER, MONEY, etc.
 				if isNumericType(dbType) {
-					// Try to convert to float64 if it looks like a decimal
 					if s := string(b); s != "" {
-						if _, err := strconv.ParseFloat(s, 64); err == nil {
-							// If it's a whole number, maybe int64 is better?
-							// But for precision, string or float64 is safer for decimals.
-							// For now, let's use string to preserve precision for DECIMAL
-							entry[col] = s
-						} else {
-							entry[col] = s
-						}
+						entry[col] = s
 					} else {
 						entry[col] = nil
 					}
 					continue
 				}
 
-				// For other types, if it's []byte, convert to string by default for convenience
-				// except if it's explicitly a BLOB/BINARY type (though DatabaseTypeName varies)
 				if !isBinaryType(dbType) {
 					entry[col] = string(b)
 					continue
 				}
+				// Keep as []byte for binary types, but we must copy it
+				// because the underlying buffer might be reused by the driver
+				bCopy := make([]byte, len(b))
+				copy(bCopy, b)
+				entry[col] = bCopy
+				continue
 			}
 
 			entry[col] = val
