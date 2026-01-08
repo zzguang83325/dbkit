@@ -1,6 +1,6 @@
 # DBKit - Go Database Library
 
-[中文文档](README.md) | [API Reference](api_en.md) | [中文 API 手册](api.md) | [SQL Template Guide](doc/en/SQL_TEMPLATE_GUIDE_EN.md) | [SQL 模板指南](doc/cn/SQL_TEMPLATE_GUIDE.md)
+[中文文档](README.md) | [API Reference](api_en.md) | [中文 API 手册](api.md) | [SQL Template Guide](doc/en/SQL_TEMPLATE_GUIDE_EN.md) | [SQL 模板指南](doc/cn/SQL_TEMPLATE_GUIDE.md) | [Cache Usage Guide](doc/en/CACHE_ENHANCEMENT_GUIDE.md) | [缓存使用指南](doc/cn/CACHE_ENHANCEMENT_GUIDE.md)
 
 DBKit is a high-performance, lightweight database ORM library for Go, inspired  from Java's JFinal framework. It provides an extremely simple and intuitive API that makes database operations as easy as working with objects through `Record` and DbModel.
 

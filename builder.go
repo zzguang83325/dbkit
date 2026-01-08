@@ -38,6 +38,7 @@ type QueryBuilder struct {
 	offset              int
 	cacheRepositoryName string
 	cacheTTL            time.Duration
+	cacheProvider       CacheProvider // 指定的缓存提供者（nil 表示使用默认缓存）
 	timeout             time.Duration
 	lastErr             error
 	withTrashed         bool             // Include soft-deleted records
@@ -79,6 +80,7 @@ func (db *DB) Table(name string) *QueryBuilder {
 		selectSql:           "*",
 		cacheRepositoryName: db.cacheRepositoryName,
 		cacheTTL:            db.cacheTTL,
+		cacheProvider:       db.cacheProvider, // 继承 DB 的缓存提供者
 		lastErr:             db.lastErr,
 	}
 }
@@ -95,6 +97,7 @@ func (tx *Tx) Table(name string) *QueryBuilder {
 		selectSql:           "*",
 		cacheRepositoryName: tx.cacheRepositoryName,
 		cacheTTL:            tx.cacheTTL,
+		cacheProvider:       tx.cacheProvider, // 继承 Tx 的缓存提供者
 	}
 }
 
@@ -406,6 +409,41 @@ func (qb *QueryBuilder) SelectSubquery(sub *Subquery, alias string) *QueryBuilde
 // Cache enables caching for the query
 func (qb *QueryBuilder) Cache(cacheRepositoryName string, ttl ...time.Duration) *QueryBuilder {
 	qb.cacheRepositoryName = cacheRepositoryName
+	qb.cacheProvider = nil // 使用默认缓存
+	if len(ttl) > 0 {
+		qb.cacheTTL = ttl[0]
+	} else {
+		qb.cacheTTL = -1
+	}
+	return qb
+}
+
+// LocalCache 使用本地缓存
+func (qb *QueryBuilder) LocalCache(cacheRepositoryName string, ttl ...time.Duration) *QueryBuilder {
+	qb.cacheRepositoryName = cacheRepositoryName
+	qb.cacheProvider = GetLocalCacheInstance()
+	if len(ttl) > 0 {
+		qb.cacheTTL = ttl[0]
+	} else {
+		qb.cacheTTL = -1
+	}
+	return qb
+}
+
+// RedisCache 使用 Redis 缓存
+func (qb *QueryBuilder) RedisCache(cacheRepositoryName string, ttl ...time.Duration) *QueryBuilder {
+	redisCache := GetRedisCacheInstance()
+	if redisCache == nil {
+		// 如果 Redis 缓存未初始化，记录错误但不中断链式调用
+		LogError("Redis cache not initialized for QueryBuilder", map[string]interface{}{
+			"table":               qb.table,
+			"cacheRepositoryName": cacheRepositoryName,
+		})
+		return qb
+	}
+
+	qb.cacheRepositoryName = cacheRepositoryName
+	qb.cacheProvider = redisCache
 	if len(ttl) > 0 {
 		qb.cacheTTL = ttl[0]
 	} else {
@@ -418,6 +456,21 @@ func (qb *QueryBuilder) Cache(cacheRepositoryName string, ttl ...time.Duration) 
 func (qb *QueryBuilder) Timeout(d time.Duration) *QueryBuilder {
 	qb.timeout = d
 	return qb
+}
+
+// getEffectiveCache 获取当前有效的缓存提供者
+// 优先级: QueryBuilder.cacheProvider > DB/Tx.cacheProvider > 全局默认缓存
+func (qb *QueryBuilder) getEffectiveCache() CacheProvider {
+	if qb.cacheProvider != nil {
+		return qb.cacheProvider
+	}
+	if qb.db != nil && qb.db.cacheProvider != nil {
+		return qb.db.cacheProvider
+	}
+	if qb.tx != nil && qb.tx.cacheProvider != nil {
+		return qb.tx.cacheProvider
+	}
+	return GetCache()
 }
 
 // buildSelectSql constructs the final SELECT SQL string
@@ -595,8 +648,9 @@ func (qb *QueryBuilder) Query() ([]Record, error) {
 
 	// Handle caching
 	if qb.cacheRepositoryName != "" && qb.tx == nil {
+		cache := qb.getEffectiveCache()
 		cacheKey := qb.generateCacheKey(sql, args)
-		if val, ok := CacheGet(qb.cacheRepositoryName, cacheKey); ok {
+		if val, ok := cache.CacheGet(qb.cacheRepositoryName, cacheKey); ok {
 			if records, ok := val.([]Record); ok {
 				return records, nil
 			}
@@ -608,7 +662,7 @@ func (qb *QueryBuilder) Query() ([]Record, error) {
 		}
 		records, err := db.Query(sql, args...)
 		if err == nil {
-			CacheSet(qb.cacheRepositoryName, cacheKey, records, qb.cacheTTL)
+			cache.CacheSet(qb.cacheRepositoryName, cacheKey, records, qb.cacheTTL)
 		}
 		return records, err
 	}
@@ -674,8 +728,9 @@ func (qb *QueryBuilder) QueryFirst() (*Record, error) {
 
 	// Handle caching
 	if qb.cacheRepositoryName != "" && qb.tx == nil {
+		cache := qb.getEffectiveCache()
 		cacheKey := qb.generateCacheKey(sql, args) + "_first"
-		if val, ok := CacheGet(qb.cacheRepositoryName, cacheKey); ok {
+		if val, ok := cache.CacheGet(qb.cacheRepositoryName, cacheKey); ok {
 			if record, ok := val.(*Record); ok {
 				return record, nil
 			}
@@ -687,7 +742,7 @@ func (qb *QueryBuilder) QueryFirst() (*Record, error) {
 		}
 		record, err := db.QueryFirst(sql, args...)
 		if err == nil && record != nil {
-			CacheSet(qb.cacheRepositoryName, cacheKey, record, qb.cacheTTL)
+			cache.CacheSet(qb.cacheRepositoryName, cacheKey, record, qb.cacheTTL)
 		}
 		return record, err
 	}
@@ -738,8 +793,9 @@ func (qb *QueryBuilder) Paginate(pageNumber, pageSize int) (*Page[Record], error
 
 	// 处理缓存
 	if qb.cacheRepositoryName != "" && qb.tx == nil {
+		cache := qb.getEffectiveCache()
 		cacheKey := qb.generateCacheKey(sql, args) + fmt.Sprintf("_p%d_s%d", pageNumber, pageSize)
-		if val, ok := CacheGet(qb.cacheRepositoryName, cacheKey); ok {
+		if val, ok := cache.CacheGet(qb.cacheRepositoryName, cacheKey); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
@@ -756,7 +812,7 @@ func (qb *QueryBuilder) Paginate(pageNumber, pageSize int) (*Page[Record], error
 		}
 
 		if err == nil {
-			CacheSet(qb.cacheRepositoryName, cacheKey, pageObj, qb.cacheTTL)
+			cache.CacheSet(qb.cacheRepositoryName, cacheKey, pageObj, qb.cacheTTL)
 		}
 		return pageObj, err
 	}
@@ -834,9 +890,10 @@ func (qb *QueryBuilder) Count() (int64, error) {
 
 	// Handle caching
 	if qb.cacheRepositoryName != "" && qb.tx == nil {
+		cache := qb.getEffectiveCache()
 		sql, args := qb.buildSelectSql()
 		cacheKey := qb.generateCacheKey(sql, args) + "_count"
-		if val, ok := CacheGet(qb.cacheRepositoryName, cacheKey); ok {
+		if val, ok := cache.CacheGet(qb.cacheRepositoryName, cacheKey); ok {
 			if count, ok := val.(int64); ok {
 				return count, nil
 			}
@@ -845,7 +902,7 @@ func (qb *QueryBuilder) Count() (int64, error) {
 		// If not in cache, query and store
 		count, err := qb.db.Count(qb.table, whereSql, qb.whereArgs...)
 		if err == nil {
-			CacheSet(qb.cacheRepositoryName, cacheKey, count, qb.cacheTTL)
+			cache.CacheSet(qb.cacheRepositoryName, cacheKey, count, qb.cacheTTL)
 		}
 		return count, err
 	}

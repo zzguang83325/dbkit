@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -10,6 +11,22 @@ import (
 )
 
 func main() {
+	// 可以通过命令行参数选择运行哪个演示
+	// go run . test - 运行 Table 缓存继承测试
+	// go run . sqltemplate - 运行 SQL 模板分页测试
+	// go run . - 运行完整演示
+
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "test":
+			TestTableCacheInheritance()
+			return
+		case "sqltemplate":
+			TestSqlTemplatePagination()
+			return
+		}
+	}
+
 	fmt.Println("=== 本地缓存 vs Redis 缓存演示 ===")
 
 	// 1. 初始化数据库连接

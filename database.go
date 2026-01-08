@@ -120,6 +120,16 @@ type Tx struct {
 	cacheRepositoryName string
 	cacheTTL            time.Duration
 	timeout             time.Duration // Query timeout for this transaction
+	cacheProvider       CacheProvider // 指定的缓存提供者（nil 表示使用默认缓存）
+}
+
+// getEffectiveCache 获取当前有效的缓存提供者
+// 如果 Tx 实例指定了缓存提供者，则使用指定的；否则使用全局默认缓存
+func (tx *Tx) getEffectiveCache() CacheProvider {
+	if tx.cacheProvider != nil {
+		return tx.cacheProvider
+	}
+	return GetCache()
 }
 
 // sqlExecutor is an internal interface for executing SQL commands

@@ -233,9 +233,56 @@ dbkit.SetDefaultCache(rc)
 
 ## 运行示例
 
+### 1. 完整演示（本地缓存 vs Redis 缓存）
 ```bash
-go run examples/cache_local_redis/main.go
+go run .
 ```
+或
+```bash
+go run main.go
+```
+
+### 2. Table() 方法缓存继承测试
+```bash
+go run . test
+```
+
+测试 `DB.LocalCache().Table()` 和 `Tx.LocalCache().Table()` 等链式调用的缓存继承功能。
+
+### 3. SQL 模板分页测试
+```bash
+go run . sqltemplate
+```
+
+测试 SQL 模板的分页查询功能,包括:
+- 无参数、单参数、多参数、命名参数的分页查询
+- 本地缓存和 Redis 缓存的分页查询
+- DB 实例和事务中的 SQL 模板分页
+- 不同页码的缓存策略
+
+## 前置条件
+
+### MySQL 数据库
+确保 MySQL 数据库正在运行,连接信息:
+```
+Host: localhost
+Port: 3306
+User: root
+Password: 123456
+Database: test
+```
+
+### Redis 服务器（可选）
+如果要测试 Redis 缓存功能:
+```
+Host: 192.168.10.205
+Port: 6379
+Password: (空)
+KeyPrefix: cpdv3
+DB: 2
+```
+
+**注意**: 如果 Redis 未配置,程序会记录错误但不会中断,本地缓存功能仍然可用。
 
 ## 输出示例
 

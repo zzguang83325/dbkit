@@ -61,12 +61,15 @@ type ConfigInfo struct {
 
 // SqlTemplateBuilder provides a fluent interface for executing SQL templates
 type SqlTemplateBuilder struct {
-	sqlName   string
-	params    interface{} // 支持 map[string]interface{} 或 []interface{}
-	timeout   time.Duration
-	dbName    string // 用于多数据库支持
-	tx        *Tx    // 用于事务支持
-	configMgr *SqlConfigManager
+	sqlName             string
+	params              interface{} // 支持 map[string]interface{} 或 []interface{}
+	timeout             time.Duration
+	dbName              string // 用于多数据库支持
+	tx                  *Tx    // 用于事务支持
+	configMgr           *SqlConfigManager
+	cacheRepositoryName string        // 缓存仓库名称
+	cacheTTL            time.Duration // 缓存过期时间
+	cacheProvider       CacheProvider // 指定的缓存提供者（nil 表示使用默认缓存）
 }
 
 // SqlTemplateEngine handles SQL template processing and parameter substitution
@@ -491,12 +494,17 @@ func (db *DB) SqlTemplate(name string, params ...interface{}) *SqlTemplateBuilde
 		processedParams = params
 	}
 
-	return &SqlTemplateBuilder{
-		sqlName:   name,
-		params:    processedParams,
-		configMgr: getGlobalConfigManager(),
-		dbName:    db.dbMgr.name,
+	builder := &SqlTemplateBuilder{
+		sqlName:             name,
+		params:              processedParams,
+		configMgr:           getGlobalConfigManager(),
+		dbName:              db.dbMgr.name,
+		cacheRepositoryName: db.cacheRepositoryName, // 继承 DB 的缓存仓库名
+		cacheTTL:            db.cacheTTL,            // 继承 DB 的缓存 TTL
+		cacheProvider:       db.cacheProvider,       // 继承 DB 的缓存提供者
 	}
+
+	return builder
 }
 
 // SqlTemplate method for Tx to support transaction execution
@@ -518,18 +526,92 @@ func (tx *Tx) SqlTemplate(name string, params ...interface{}) *SqlTemplateBuilde
 		processedParams = params
 	}
 
-	return &SqlTemplateBuilder{
-		sqlName:   name,
-		params:    processedParams,
-		configMgr: getGlobalConfigManager(),
-		tx:        tx,
+	builder := &SqlTemplateBuilder{
+		sqlName:             name,
+		params:              processedParams,
+		configMgr:           getGlobalConfigManager(),
+		tx:                  tx,
+		cacheRepositoryName: tx.cacheRepositoryName, // 继承 Tx 的缓存仓库名
+		cacheTTL:            tx.cacheTTL,            // 继承 Tx 的缓存 TTL
+		cacheProvider:       tx.cacheProvider,       // 继承 Tx 的缓存提供者
 	}
+
+	return builder
 }
 
 // Timeout sets the query timeout for this SQL template builder
 func (b *SqlTemplateBuilder) Timeout(timeout time.Duration) *SqlTemplateBuilder {
 	b.timeout = timeout
 	return b
+}
+
+// Cache 使用默认缓存（可通过 SetDefaultCache 切换默认缓存）
+func (b *SqlTemplateBuilder) Cache(cacheRepositoryName string, ttl ...time.Duration) *SqlTemplateBuilder {
+	b.cacheRepositoryName = cacheRepositoryName
+	b.cacheProvider = nil // 使用默认缓存
+	if len(ttl) > 0 {
+		b.cacheTTL = ttl[0]
+	} else {
+		b.cacheTTL = -1
+	}
+	return b
+}
+
+// LocalCache 使用本地缓存
+func (b *SqlTemplateBuilder) LocalCache(cacheRepositoryName string, ttl ...time.Duration) *SqlTemplateBuilder {
+	b.cacheRepositoryName = cacheRepositoryName
+	b.cacheProvider = GetLocalCacheInstance()
+	if len(ttl) > 0 {
+		b.cacheTTL = ttl[0]
+	} else {
+		b.cacheTTL = -1
+	}
+	return b
+}
+
+// RedisCache 使用 Redis 缓存
+func (b *SqlTemplateBuilder) RedisCache(cacheRepositoryName string, ttl ...time.Duration) *SqlTemplateBuilder {
+	redisCache := GetRedisCacheInstance()
+	if redisCache == nil {
+		// 如果 Redis 缓存未初始化，记录错误但不中断链式调用
+		LogError("Redis cache not initialized for SQL template", map[string]interface{}{
+			"sqlName":             b.sqlName,
+			"cacheRepositoryName": cacheRepositoryName,
+		})
+		return b
+	}
+
+	b.cacheRepositoryName = cacheRepositoryName
+	b.cacheProvider = redisCache
+	if len(ttl) > 0 {
+		b.cacheTTL = ttl[0]
+	} else {
+		b.cacheTTL = -1
+	}
+	return b
+}
+
+// getEffectiveCache 获取当前有效的缓存提供者
+func (b *SqlTemplateBuilder) getEffectiveCache() CacheProvider {
+	if b.cacheProvider != nil {
+		return b.cacheProvider
+	}
+	return GetCache()
+}
+
+// getDbName 获取数据库名称
+func (b *SqlTemplateBuilder) getDbName() string {
+	if b.tx != nil && b.tx.dbMgr != nil {
+		return b.tx.dbMgr.name
+	}
+	if b.dbName != "" {
+		return b.dbName
+	}
+	// 尝试获取默认数据库名称
+	if db, err := defaultDB(); err == nil && db.dbMgr != nil {
+		return db.dbMgr.name
+	}
+	return ""
 }
 
 // Query executes the SQL template and returns multiple records
@@ -539,16 +621,57 @@ func (b *SqlTemplateBuilder) Query() ([]Record, error) {
 		return nil, err
 	}
 
-	// Log SQL execution in debug mode
-	// LogDebug("Executing SQL template query", map[string]interface{}{
-	// 	"sqlName":    b.sqlName,
-	// 	"finalSQL":   finalSQL,
-	// 	"paramCount": len(args),
-	// 	"timeout":    b.timeout.String(),
-	// 	"hasDB":      b.dbName != "",
-	// 	"hasTx":      b.tx != nil,
-	// })
+	// 处理缓存
+	if b.cacheRepositoryName != "" {
+		cache := b.getEffectiveCache()
+		dbName := b.getDbName()
+		key := GenerateCacheKey(dbName, finalSQL, args...)
 
+		// 尝试从缓存读取
+		if val, ok := cache.CacheGet(b.cacheRepositoryName, key); ok {
+			var results []Record
+			if convertCacheValue(val, &results) {
+				return results, nil
+			}
+		}
+
+		// 执行查询
+		var results []Record
+		if b.tx != nil {
+			// 在事务中执行
+			if b.timeout > 0 {
+				results, err = b.tx.Timeout(b.timeout).Query(finalSQL, args...)
+			} else {
+				results, err = b.tx.Query(finalSQL, args...)
+			}
+		} else if b.dbName != "" {
+			// 在指定数据库上执行
+			db := Use(b.dbName)
+			if db.lastErr != nil {
+				return nil, db.lastErr
+			}
+			if b.timeout > 0 {
+				results, err = db.Timeout(b.timeout).Query(finalSQL, args...)
+			} else {
+				results, err = db.Query(finalSQL, args...)
+			}
+		} else {
+			// 在默认数据库上执行
+			if b.timeout > 0 {
+				results, err = Timeout(b.timeout).Query(finalSQL, args...)
+			} else {
+				results, err = Query(finalSQL, args...)
+			}
+		}
+
+		// 如果查询成功，写入缓存
+		if err == nil {
+			cache.CacheSet(b.cacheRepositoryName, key, results, getEffectiveTTL(b.cacheRepositoryName, b.cacheTTL))
+		}
+		return results, err
+	}
+
+	// 无缓存的执行路径
 	if b.tx != nil {
 		// Execute in transaction context
 		if b.timeout > 0 {
@@ -581,16 +704,57 @@ func (b *SqlTemplateBuilder) Paginate(page int, pageSize int) (*Page[Record], er
 		return nil, err
 	}
 
-	// Log SQL execution in debug mode
-	// LogDebug("Executing SQL template Paginate", map[string]interface{}{
-	// 	"sqlName":    b.sqlName,
-	// 	"finalSQL":   finalSQL,
-	// 	"paramCount": len(args),
-	// 	"timeout":    b.timeout.String(),
-	// 	"hasDB":      b.dbName != "",
-	// 	"hasTx":      b.tx != nil,
-	// })
+	// 处理缓存
+	if b.cacheRepositoryName != "" {
+		cache := b.getEffectiveCache()
+		dbName := b.getDbName()
+		key := GenerateCacheKey(dbName, "PAGINATE_TEMPLATE:"+finalSQL, args...)
 
+		// 尝试从缓存读取
+		if val, ok := cache.CacheGet(b.cacheRepositoryName, key); ok {
+			var pageObj *Page[Record]
+			if convertCacheValue(val, &pageObj) {
+				return pageObj, nil
+			}
+		}
+
+		// 执行分页查询
+		var pageObj *Page[Record]
+		if b.tx != nil {
+			// 在事务中执行
+			if b.timeout > 0 {
+				pageObj, err = b.tx.Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
+			} else {
+				pageObj, err = b.tx.Paginate(page, pageSize, finalSQL, args...)
+			}
+		} else if b.dbName != "" {
+			// 在指定数据库上执行
+			db := Use(b.dbName)
+			if db.lastErr != nil {
+				return nil, db.lastErr
+			}
+			if b.timeout > 0 {
+				pageObj, err = db.Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
+			} else {
+				pageObj, err = db.Paginate(page, pageSize, finalSQL, args...)
+			}
+		} else {
+			// 在默认数据库上执行
+			if b.timeout > 0 {
+				pageObj, err = Timeout(b.timeout).Paginate(page, pageSize, finalSQL, args...)
+			} else {
+				pageObj, err = Paginate(page, pageSize, finalSQL, args...)
+			}
+		}
+
+		// 如果查询成功，写入缓存
+		if err == nil {
+			cache.CacheSet(b.cacheRepositoryName, key, pageObj, getEffectiveTTL(b.cacheRepositoryName, b.cacheTTL))
+		}
+		return pageObj, err
+	}
+
+	// 无缓存的执行路径
 	if b.tx != nil {
 		// Execute in transaction context
 		if b.timeout > 0 {
@@ -623,16 +787,57 @@ func (b *SqlTemplateBuilder) QueryFirst() (*Record, error) {
 		return nil, err
 	}
 
-	// Log SQL execution in debug mode
-	// LogDebug("Executing SQL template query first", map[string]interface{}{
-	// 	"sqlName":    b.sqlName,
-	// 	"finalSQL":   finalSQL,
-	// 	"paramCount": len(args),
-	// 	"timeout":    b.timeout.String(),
-	// 	"hasDB":      b.dbName != "",
-	// 	"hasTx":      b.tx != nil,
-	// })
+	// 处理缓存
+	if b.cacheRepositoryName != "" {
+		cache := b.getEffectiveCache()
+		dbName := b.getDbName()
+		key := GenerateCacheKey(dbName, finalSQL, args...) + "_first"
 
+		// 尝试从缓存读取
+		if val, ok := cache.CacheGet(b.cacheRepositoryName, key); ok {
+			var result *Record
+			if convertCacheValue(val, &result) {
+				return result, nil
+			}
+		}
+
+		// 执行查询
+		var result *Record
+		if b.tx != nil {
+			// 在事务中执行
+			if b.timeout > 0 {
+				result, err = b.tx.Timeout(b.timeout).QueryFirst(finalSQL, args...)
+			} else {
+				result, err = b.tx.QueryFirst(finalSQL, args...)
+			}
+		} else if b.dbName != "" {
+			// 在指定数据库上执行
+			db := Use(b.dbName)
+			if db.lastErr != nil {
+				return nil, db.lastErr
+			}
+			if b.timeout > 0 {
+				result, err = db.Timeout(b.timeout).QueryFirst(finalSQL, args...)
+			} else {
+				result, err = db.QueryFirst(finalSQL, args...)
+			}
+		} else {
+			// 在默认数据库上执行
+			if b.timeout > 0 {
+				result, err = Timeout(b.timeout).QueryFirst(finalSQL, args...)
+			} else {
+				result, err = QueryFirst(finalSQL, args...)
+			}
+		}
+
+		// 如果查询成功且有结果，写入缓存
+		if err == nil && result != nil {
+			cache.CacheSet(b.cacheRepositoryName, key, result, getEffectiveTTL(b.cacheRepositoryName, b.cacheTTL))
+		}
+		return result, err
+	}
+
+	// 无缓存的执行路径
 	if b.tx != nil {
 		// Execute in transaction context
 		if b.timeout > 0 {

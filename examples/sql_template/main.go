@@ -36,9 +36,6 @@ func main() {
 	fmt.Println("\n【步骤 4: 分页查询】")
 	demonstratePaginate() //分页查询
 
-
-
-
 	// 步骤 5: 更新操作
 	fmt.Println("\n【步骤 5: 更新数据】")
 	demonstrateUpdate()
@@ -50,6 +47,10 @@ func main() {
 	// 步骤 7: 事务处理
 	fmt.Println("\n【步骤 7: 事务处理】")
 	demonstrateTransaction()
+
+	// 步骤 8: 缓存功能测试
+	fmt.Println("\n【步骤 8: 缓存功能测试】")
+	demonstrateCacheFeatures()
 
 	fmt.Println("\n========================================")
 	fmt.Println("   Sql模板 快速入门完成！")
@@ -330,4 +331,238 @@ func demonstrateTransaction() {
 		fmt.Printf("✅ 验证用户: ID=%v, Name=%v, Email=%v\n",
 			record.Get("id"), record.Get("name"), record.Get("email"))
 	}
+}
+
+
+// 缓存功能演示
+func demonstrateCacheFeatures() {
+	fmt.Println("--- SQL 模板缓存功能演示 ---")
+
+	// 初始化本地缓存
+	fmt.Println("\n1. 初始化本地缓存")
+	dbkit.InitLocalCache(10 * time.Minute)
+	fmt.Println("✅ 本地缓存已初始化")
+
+	// 测试 1: 基本查询 + 本地缓存
+	fmt.Println("\n2. 基本查询 + 本地缓存")
+	
+	// 第一次查询 - 从数据库读取
+	start := time.Now()
+	record1, err := dbkit.SqlTemplate("user_service.findById", 1).
+		LocalCache("user_cache", 5*time.Minute).
+		QueryFirst()
+	time1 := time.Since(start)
+	
+	if err != nil {
+		log.Printf("❌ 第 1 次查询失败: %v", err)
+	} else if record1 != nil {
+		fmt.Printf("✅ 第 1 次查询 (从数据库): ID=%v, Name=%v, 耗时 %v\n",
+			record1.Get("id"), record1.Get("name"), time1)
+	}
+	
+	// 第二次查询 - 从本地缓存读取
+	start = time.Now()
+	record2, err := dbkit.SqlTemplate("user_service.findById", 1).
+		LocalCache("user_cache", 5*time.Minute).
+		QueryFirst()
+	time2 := time.Since(start)
+	
+	if err != nil {
+		log.Printf("❌ 第 2 次查询失败: %v", err)
+	} else if record2 != nil {
+		fmt.Printf("✅ 第 2 次查询 (从本地缓存): ID=%v, Name=%v, 耗时 %v\n",
+			record2.Get("id"), record2.Get("name"), time2)
+		if time2 < time1 {
+			fmt.Printf("⚡ 性能提升: %.1fx 倍\n", float64(time1)/float64(time2))
+		}
+	}
+
+	// 测试 2: 分页查询 + 本地缓存
+	fmt.Println("\n3. 分页查询 + 本地缓存")
+	
+	// 第一次分页查询 - 从数据库读取
+	start = time.Now()
+	page1, err := dbkit.SqlTemplate("user_service.findUsers").
+		LocalCache("users_page", 5*time.Minute).
+		Paginate(1, 5)
+	time1 = time.Since(start)
+	
+	if err != nil {
+		log.Printf("❌ 第 1 次分页查询失败: %v", err)
+	} else if page1 != nil {
+		fmt.Printf("✅ 第 1 次分页查询 (从数据库): 第%d页, 共%d条记录, 耗时 %v\n",
+			page1.PageNumber, page1.TotalRow, time1)
+	}
+	
+	// 第二次分页查询 - 从本地缓存读取
+	start = time.Now()
+	page2, err := dbkit.SqlTemplate("user_service.findUsers").
+		LocalCache("users_page", 5*time.Minute).
+		Paginate(1, 5)
+	time2 = time.Since(start)
+	
+	if err != nil {
+		log.Printf("❌ 第 2 次分页查询失败: %v", err)
+	} else if page2 != nil {
+		fmt.Printf("✅ 第 2 次分页查询 (从本地缓存): 第%d页, 共%d条记录, 耗时 %v\n",
+			page2.PageNumber, page2.TotalRow, time2)
+		if time2 < time1 {
+			fmt.Printf("⚡ 性能提升: %.1fx 倍\n", float64(time1)/float64(time2))
+		}
+	}
+
+	// 测试 3: 带参数的分页查询 + 本地缓存
+	fmt.Println("\n4. 带参数的分页查询 + 本地缓存")
+	
+	params := map[string]interface{}{
+		"status": 1,
+	}
+	
+	// 第一次查询
+	start = time.Now()
+	page3, err := dbkit.SqlTemplate("user_service.findUsers", params).
+		LocalCache("users_status_page", 5*time.Minute).
+		Paginate(1, 3)
+	time1 = time.Since(start)
+	
+	if err != nil {
+		log.Printf("❌ 第 1 次带参数分页查询失败: %v", err)
+	} else if page3 != nil {
+		fmt.Printf("✅ 第 1 次带参数分页查询 (从数据库): 状态=1, 共%d条记录, 耗时 %v\n",
+			page3.TotalRow, time1)
+	}
+	
+	// 第二次查询
+	start = time.Now()
+	page4, err := dbkit.SqlTemplate("user_service.findUsers", params).
+		LocalCache("users_status_page", 5*time.Minute).
+		Paginate(1, 3)
+	time2 = time.Since(start)
+	
+	if err != nil {
+		log.Printf("❌ 第 2 次带参数分页查询失败: %v", err)
+	} else if page4 != nil {
+		fmt.Printf("✅ 第 2 次带参数分页查询 (从本地缓存): 状态=1, 共%d条记录, 耗时 %v\n",
+			page4.TotalRow, time2)
+		if time2 < time1 {
+			fmt.Printf("⚡ 性能提升: %.1fx 倍\n", float64(time1)/float64(time2))
+		}
+	}
+
+	// 测试 4: DB 实例的 SQL 模板缓存
+	fmt.Println("\n5. DB 实例的 SQL 模板缓存")
+	
+	db, _ := dbkit.UseWithError("default")
+	
+	// 方式 1: db.LocalCache().SqlTemplate()
+	start = time.Now()
+	page5, err := db.LocalCache("db_template_page", 5*time.Minute).
+		SqlTemplate("user_service.findUsers").
+		Paginate(1, 5)
+	time1 = time.Since(start)
+	
+	if err != nil {
+		log.Printf("❌ 方式 1 查询失败: %v", err)
+	} else if page5 != nil {
+		fmt.Printf("✅ 方式 1 (db.LocalCache().SqlTemplate()): 共%d条记录, 耗时 %v\n",
+			page5.TotalRow, time1)
+	}
+	
+	// 方式 2: db.SqlTemplate().LocalCache()
+	start = time.Now()
+	page6, err := db.SqlTemplate("user_service.findUsers").
+		LocalCache("db_template_page2", 5*time.Minute).
+		Paginate(1, 5)
+	time1 = time.Since(start)
+	
+	if err != nil {
+		log.Printf("❌ 方式 2 查询失败: %v", err)
+	} else if page6 != nil {
+		fmt.Printf("✅ 方式 2 (db.SqlTemplate().LocalCache()): 共%d条记录, 耗时 %v\n",
+			page6.TotalRow, time1)
+	}
+
+	// 测试 5: 事务中的 SQL 模板缓存
+	fmt.Println("\n6. 事务中的 SQL 模板缓存")
+	
+	err = dbkit.Transaction(func(tx *dbkit.Tx) error {
+		// 在事务中使用缓存
+		page, err := tx.LocalCache("tx_template_page", 5*time.Minute).
+			SqlTemplate("user_service.findUsers").
+			Paginate(1, 5)
+		
+		if err != nil {
+			return err
+		}
+		
+		fmt.Printf("✅ 事务中分页查询成功: 共%d条记录\n", page.TotalRow)
+		return nil
+	})
+	
+	if err != nil {
+		log.Printf("❌ 事务失败: %v", err)
+	}
+
+	// 测试 6: 不同页码的缓存
+	fmt.Println("\n7. 不同页码的缓存")
+	
+	// 查询第 1 页
+	page7, _ := dbkit.SqlTemplate("user_service.findUsers").
+		LocalCache("multi_page", 5*time.Minute).
+		Paginate(1, 3)
+	if page7 != nil {
+		fmt.Printf("✅ 第 1 页: 共%d条记录\n", page7.TotalRow)
+	}
+	
+	// 查询第 2 页
+	page8, _ := dbkit.SqlTemplate("user_service.findUsers").
+		LocalCache("multi_page", 5*time.Minute).
+		Paginate(2, 3)
+	if page8 != nil {
+		fmt.Printf("✅ 第 2 页: 共%d条记录\n", page8.TotalRow)
+	}
+	
+	fmt.Println("说明: 每个页码都会单独缓存")
+
+	// 测试 7: Query 方法的缓存
+	fmt.Println("\n8. Query 方法的缓存")
+	
+	// 第一次查询
+	start = time.Now()
+	records1, err := dbkit.SqlTemplate("user_service.findUsers").
+		LocalCache("users_list", 5*time.Minute).
+		Query()
+	time1 = time.Since(start)
+	
+	if err != nil {
+		log.Printf("❌ 第 1 次 Query 失败: %v", err)
+	} else {
+		fmt.Printf("✅ 第 1 次 Query (从数据库): 查询到%d条记录, 耗时 %v\n",
+			len(records1), time1)
+	}
+	
+	// 第二次查询
+	start = time.Now()
+	records2, err := dbkit.SqlTemplate("user_service.findUsers").
+		LocalCache("users_list", 5*time.Minute).
+		Query()
+	time2 = time.Since(start)
+	
+	if err != nil {
+		log.Printf("❌ 第 2 次 Query 失败: %v", err)
+	} else {
+		fmt.Printf("✅ 第 2 次 Query (从本地缓存): 查询到%d条记录, 耗时 %v\n",
+			len(records2), time2)
+		if time2 < time1 {
+			fmt.Printf("⚡ 性能提升: %.1fx 倍\n", float64(time1)/float64(time2))
+		}
+	}
+
+	// 总结
+	fmt.Println("\n【缓存功能总结】")
+	fmt.Println("✅ SQL 模板支持本地缓存")
+	fmt.Println("✅ QueryFirst、Query、Paginate 都支持缓存")
+	fmt.Println("✅ 支持 DB 实例和事务中的缓存")
+	fmt.Println("✅ 不同页码会单独缓存")
+	fmt.Println("✅ 缓存显著提升查询性能")
 }
