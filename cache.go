@@ -13,7 +13,7 @@ type CacheProvider interface {
 	CacheGet(cacheRepositoryName, key string) (interface{}, bool)
 	CacheSet(cacheRepositoryName, key string, value interface{}, ttl time.Duration)
 	CacheDelete(cacheRepositoryName, key string)
-	CacheClear(cacheRepositoryName string)
+	CacheClearRepository(cacheRepositoryName string)
 	Status() map[string]interface{}
 }
 
@@ -101,13 +101,27 @@ func (lc *localCache) CacheSet(cacheRepositoryName, key string, value interface{
 }
 
 func (lc *localCache) CacheDelete(cacheRepositoryName, key string) {
+	if cacheRepositoryName == "" || key == "" {
+		return // 忽略空参数
+	}
 	if store, ok := lc.stores.Load(cacheRepositoryName); ok {
 		store.(*sync.Map).Delete(key)
 	}
 }
 
-func (lc *localCache) CacheClear(cacheRepositoryName string) {
+func (lc *localCache) CacheClearRepository(cacheRepositoryName string) {
+	if cacheRepositoryName == "" {
+		return // 忽略空字符串，避免误操作
+	}
 	lc.stores.Delete(cacheRepositoryName)
+}
+
+// ClearAll 清空所有缓存存储库
+func (lc *localCache) ClearAll() {
+	lc.stores.Range(func(key, value interface{}) bool {
+		lc.stores.Delete(key)
+		return true
+	})
 }
 
 func (lc *localCache) Status() map[string]interface{} {
@@ -214,32 +228,73 @@ func formatBytes(b int64) string {
 
 // Global cache state
 var (
-	defaultCache CacheProvider = newLocalCache(1 * time.Minute)
-	defaultTTL   time.Duration = time.Minute
-	cacheConfigs sync.Map      // map[cacheRepositoryName]time.Duration
-	cacheMu      sync.RWMutex
-	cleanupOnce  sync.Once
+	localCacheInstance CacheProvider               // 本地缓存实例
+	redisCacheInstance CacheProvider               // Redis 缓存实例
+	defaultCache       CacheProvider               // 默认缓存提供者
+	defaultTTL         time.Duration = time.Minute // 默认 TTL
+	cacheConfigs       sync.Map                    // map[cacheRepositoryName]time.Duration
+	cacheMu            sync.RWMutex                // 缓存锁
+	cleanupOnce        sync.Once                   // 清理任务只执行一次
 )
 
-// GetCache returns the current global cache provider
+// init 初始化默认使用本地缓存
+func init() {
+	localCacheInstance = newLocalCache(1 * time.Minute)
+	defaultCache = localCacheInstance
+}
+
+// GetCache 获取当前默认缓存提供者
 func GetCache() CacheProvider {
 	cacheMu.RLock()
 	defer cacheMu.RUnlock()
 	return defaultCache
 }
 
-// SetCache sets the global cache provider
+// SetDefaultCache 设置默认缓存提供者
 func SetDefaultCache(c CacheProvider) {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 	defaultCache = c
 }
 
-// SetLocalCacheConfig sets the global cache provider to a new localCache with custom interval
+// InitLocalCache 初始化本地缓存实例
+func InitLocalCache(cleanupInterval time.Duration) {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	localCacheInstance = newLocalCache(cleanupInterval)
+}
+
+// InitRedisCache 初始化 Redis 缓存实例
+func InitRedisCache(provider CacheProvider) {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	redisCacheInstance = provider
+}
+
+// GetLocalCacheInstance 获取本地缓存实例
+func GetLocalCacheInstance() CacheProvider {
+	cacheMu.RLock()
+	defer cacheMu.RUnlock()
+	if localCacheInstance == nil {
+		localCacheInstance = newLocalCache(1 * time.Minute)
+	}
+	return localCacheInstance
+}
+
+// GetRedisCacheInstance 获取 Redis 缓存实例
+func GetRedisCacheInstance() CacheProvider {
+	cacheMu.RLock()
+	defer cacheMu.RUnlock()
+	return redisCacheInstance
+}
+
+// SetLocalCacheConfig 设置本地缓存配置并将其设为默认缓存
+// Deprecated: 使用 InitLocalCache 和 SetDefaultCache 代替
 func SetLocalCacheConfig(cleanupInterval time.Duration) {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
-	defaultCache = newLocalCache(cleanupInterval)
+	localCacheInstance = newLocalCache(cleanupInterval)
+	defaultCache = localCacheInstance
 }
 
 // SetDefaultTtl sets the global default TTL for caching
@@ -276,9 +331,9 @@ func CacheDelete(cacheRepositoryName, key string) {
 	defaultCache.CacheDelete(cacheRepositoryName, key)
 }
 
-// CacheClear clears all keys from a cache store
-func CacheClear(cacheRepositoryName string) {
-	defaultCache.CacheClear(cacheRepositoryName)
+// CacheClearRepository clears all keys from a cache store
+func CacheClearRepository(cacheRepositoryName string) {
+	defaultCache.CacheClearRepository(cacheRepositoryName)
 }
 
 // CacheStatus returns the current cache provider's status
@@ -286,13 +341,187 @@ func CacheStatus() map[string]interface{} {
 	return defaultCache.Status()
 }
 
-// Cache sets the cache name and TTL for the default database query
+// LocalCacheSet 在本地缓存中存储值
+func LocalCacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration) {
+	expiration := defaultTTL
+	if len(ttl) > 0 {
+		expiration = ttl[0]
+	} else if configTTL, ok := cacheConfigs.Load(cacheRepositoryName); ok {
+		expiration = configTTL.(time.Duration)
+	}
+
+	GetLocalCacheInstance().CacheSet(cacheRepositoryName, key, value, expiration)
+}
+
+// LocalCacheGet 从本地缓存中获取值
+func LocalCacheGet(cacheRepositoryName, key string) (interface{}, bool) {
+	return GetLocalCacheInstance().CacheGet(cacheRepositoryName, key)
+}
+
+// LocalCacheDelete 从本地缓存中删除指定键
+func LocalCacheDelete(cacheRepositoryName, key string) {
+	GetLocalCacheInstance().CacheDelete(cacheRepositoryName, key)
+}
+
+// LocalCacheClearRepository 清空本地缓存中的指定存储库
+func LocalCacheClearRepository(cacheRepositoryName string) {
+	GetLocalCacheInstance().CacheClearRepository(cacheRepositoryName)
+}
+
+// LocalCacheStatus 获取本地缓存状态
+func LocalCacheStatus() map[string]interface{} {
+	return GetLocalCacheInstance().Status()
+}
+
+// RedisCacheSet 在 Redis 缓存中存储值
+func RedisCacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration) error {
+	redisCache := GetRedisCacheInstance()
+	if redisCache == nil {
+		return fmt.Errorf("redis cache not initialized, call InitRedisCache first")
+	}
+
+	expiration := defaultTTL
+	if len(ttl) > 0 {
+		expiration = ttl[0]
+	} else if configTTL, ok := cacheConfigs.Load(cacheRepositoryName); ok {
+		expiration = configTTL.(time.Duration)
+	}
+
+	redisCache.CacheSet(cacheRepositoryName, key, value, expiration)
+	return nil
+}
+
+// RedisCacheGet 从 Redis 缓存中获取值
+func RedisCacheGet(cacheRepositoryName, key string) (interface{}, bool, error) {
+	redisCache := GetRedisCacheInstance()
+	if redisCache == nil {
+		return nil, false, fmt.Errorf("redis cache not initialized, call InitRedisCache first")
+	}
+
+	val, ok := redisCache.CacheGet(cacheRepositoryName, key)
+	return val, ok, nil
+}
+
+// RedisCacheDelete 从 Redis 缓存中删除指定键
+func RedisCacheDelete(cacheRepositoryName, key string) error {
+	redisCache := GetRedisCacheInstance()
+	if redisCache == nil {
+		return fmt.Errorf("redis cache not initialized, call InitRedisCache first")
+	}
+
+	redisCache.CacheDelete(cacheRepositoryName, key)
+	return nil
+}
+
+// RedisCacheClearRepository 清空 Redis 缓存中的指定存储库
+func RedisCacheClearRepository(cacheRepositoryName string) error {
+	redisCache := GetRedisCacheInstance()
+	if redisCache == nil {
+		return fmt.Errorf("redis cache not initialized, call InitRedisCache first")
+	}
+
+	redisCache.CacheClearRepository(cacheRepositoryName)
+	return nil
+}
+
+// RedisCacheStatus 获取 Redis 缓存状态
+func RedisCacheStatus() (map[string]interface{}, error) {
+	redisCache := GetRedisCacheInstance()
+	if redisCache == nil {
+		return nil, fmt.Errorf("redis cache not initialized, call InitRedisCache first")
+	}
+
+	return redisCache.Status(), nil
+}
+
+// ClearAllCaches 清空默认缓存中的所有存储库
+func ClearAllCaches() {
+	if clearer, ok := defaultCache.(interface{ ClearAll() }); ok {
+		clearer.ClearAll()
+	}
+}
+
+// LocalCacheClearAll 清空本地缓存中的所有存储库
+func LocalCacheClearAll() {
+	if clearer, ok := GetLocalCacheInstance().(interface{ ClearAll() }); ok {
+		clearer.ClearAll()
+	}
+}
+
+// RedisCacheClearAll 清空 Redis 缓存中的所有 dbkit 相关缓存
+func RedisCacheClearAll() error {
+	redisCache := GetRedisCacheInstance()
+	if redisCache == nil {
+		return fmt.Errorf("redis cache not initialized, call InitRedisCache first")
+	}
+
+	if clearer, ok := redisCache.(interface{ ClearAll() }); ok {
+		clearer.ClearAll()
+	}
+	return nil
+}
+
+// Cache 使用默认缓存创建查询构建器（可通过 SetDefaultCache 切换默认缓存）
+// 示例: dbkit.Cache("user_cache").QueryFirst("SELECT * FROM users WHERE id = ?", 1)
 func Cache(name string, ttl ...time.Duration) *DB {
 	db, err := defaultDB()
 	if err != nil {
 		return &DB{lastErr: err}
 	}
 	return db.Cache(name, ttl...)
+}
+
+// LocalCache 创建一个使用本地缓存的查询构建器
+// 示例: dbkit.LocalCache("user_cache").QueryFirst("SELECT * FROM users WHERE id = ?", 1)
+func LocalCache(cacheRepositoryName string, ttl ...time.Duration) *DB {
+	db, err := defaultDB()
+	if err != nil {
+		return &DB{lastErr: err}
+	}
+
+	newDB := &DB{
+		dbMgr:               db.dbMgr,
+		cacheProvider:       GetLocalCacheInstance(),
+		cacheRepositoryName: cacheRepositoryName,
+		cacheTTL:            -1,
+	}
+
+	if len(ttl) > 0 {
+		newDB.cacheTTL = ttl[0]
+	} else if configTTL, ok := cacheConfigs.Load(cacheRepositoryName); ok {
+		newDB.cacheTTL = configTTL.(time.Duration)
+	}
+
+	return newDB
+}
+
+// RedisCache 创建一个使用 Redis 缓存的查询构建器
+// 示例: dbkit.RedisCache("order_cache").Query("SELECT * FROM orders WHERE user_id = ?", userId)
+func RedisCache(cacheRepositoryName string, ttl ...time.Duration) *DB {
+	db, err := defaultDB()
+	if err != nil {
+		return &DB{lastErr: err}
+	}
+
+	redisCache := GetRedisCacheInstance()
+	if redisCache == nil {
+		return &DB{lastErr: fmt.Errorf("redis cache not initialized, call InitRedisCache first")}
+	}
+
+	newDB := &DB{
+		dbMgr:               db.dbMgr,
+		cacheProvider:       redisCache,
+		cacheRepositoryName: cacheRepositoryName,
+		cacheTTL:            -1,
+	}
+
+	if len(ttl) > 0 {
+		newDB.cacheTTL = ttl[0]
+	} else if configTTL, ok := cacheConfigs.Load(cacheRepositoryName); ok {
+		newDB.cacheTTL = configTTL.(time.Duration)
+	}
+
+	return newDB
 }
 
 // GenerateCacheKey creates a unique key for a query

@@ -461,40 +461,68 @@ tx.Commit()   // or tx.Rollback()
 
 ### 5. Cache Support
 
-DBKit uses built-in **LocalCache** (memory cache) by default. For Redis support, optionally import the `dbkit/redis` sub-package.
+DBKit provides flexible caching strategies, supporting both local cache and Redis cache. You can freely choose based on your scenario.
 
-#### 1. Using Built-in LocalCache (Memory)
+#### 1. Three Cache Usage Methods
+
 ```go
-// Default uses memory cache. Modify cache cleanup interval with the following function
-// Expired cache data will be cleaned up periodically
-dbkit.SetLocalCacheConfig(1 * time.Minute)
+// Method 1: Explicitly use local cache (fastest, single instance)
+user, _ := dbkit.LocalCache("user_cache").QueryFirst("SELECT * FROM users WHERE id = ?", 1)
+
+// Method 2: Explicitly use Redis cache (distributed sharing)
+order, _ := dbkit.RedisCache("order_cache").Query("SELECT * FROM orders WHERE user_id = ?", userId)
+
+// Method 3: Use default cache (defaults to local cache, switchable via SetDefaultCache)
+data, _ := dbkit.Cache("default_cache").QueryFirst("SELECT * FROM configs WHERE key = ?", key)
 ```
 
-#### 2. Using Redis Cache (Optional)
-First ensure your project imports the `dbkit/redis` sub-package, which will pull Redis dependencies.
+#### 2. Initialize Cache
 
 ```go
+// Local cache (already initialized by default, optional configuration for cleanup interval)
+dbkit.InitLocalCache(1 * time.Minute)
+
+// Redis cache (requires importing dbkit/redis sub-package first)
 import "github.com/zzguang83325/dbkit/redis"
 
-// Create Redis cache instance (parameters: address, username, password, DB)
-rc, err := redis.NewRedisCache("localhost:6379", "username", "password", 1)
-if err == nil {
-    dbkit.SetDefaultCache(rc) // Switch global cache to Redis
+rc, err := redis.NewRedisCache("localhost:6379", "", "password", 0)
+if err != nil {
+    panic(err)
 }
+dbkit.InitRedisCache(rc)
+
+// Optional: Switch default cache to Redis
+dbkit.SetDefaultCache(rc)
 ```
 
-#### 3. Query Data with Auto Caching
-```go
-// Create a cache store and set default expiration time
-dbkit.CreateCache("user_cache", 10*time.Minute)
+#### 3. Usage Scenarios
 
-// Auto query cache: chain call Cache()
-// If cache hits, return directly; otherwise query database and auto write to cache
-records, err := dbkit.Cache("user_cache").Query("SELECT * FROM users")
+```go
+// Scenario 1: Configuration data with local cache (fast access, rarely changes)
+configs, _ := dbkit.LocalCache("config_cache", 10*time.Minute).
+    Query("SELECT * FROM configs")
+
+// Scenario 2: Business data with Redis cache (multi-instance sharing)
+orders, _ := dbkit.RedisCache("order_cache", 5*time.Minute).
+    Query("SELECT * FROM orders WHERE user_id = ?", userId)
+
+// Scenario 3: Mixed usage
+func GetDashboardData(userID int) (*Dashboard, error) {
+    // Configuration with local cache
+    configs, _ := dbkit.LocalCache("configs").Query("SELECT * FROM configs")
+    
+    // User data with Redis
+    user, _ := dbkit.RedisCache("users").QueryFirst("SELECT * FROM users WHERE id = ?", userID)
+    
+    return &Dashboard{Configs: configs, User: user}, nil
+}
 ```
 
 #### 4. Manual Cache Operations
 
+DBKit provides three sets of cache operation functions:
+
+**Default Cache Operations** (operate on current default cache):
 ```go
 // Store cache
 dbkit.CacheSet("my_store", "key1", "value1", 5*time.Minute)
@@ -505,18 +533,94 @@ val, ok := dbkit.CacheGet("my_store", "key1")
 // Delete specific key
 dbkit.CacheDelete("my_store", "key1")
 
-// Clear entire store
-dbkit.CacheClear("my_store")
+// Clear specific repository
+dbkit.CacheClearRepository("my_store")
+
+// View status
+status := dbkit.CacheStatus()
 ```
 
-#### 5. View Cache Status
+**Local Cache Operations** (directly operate on local cache):
+```go
+// Store to local cache
+dbkit.LocalCacheSet("config", "key1", "value1", 10*time.Minute)
+
+// Get from local cache
+val, ok := dbkit.LocalCacheGet("config", "key1")
+
+// Delete local cache key
+dbkit.LocalCacheDelete("config", "key1")
+
+// Clear local cache repository
+dbkit.LocalCacheClearRepository("config")
+
+// View local cache status
+status := dbkit.LocalCacheStatus()
+```
+
+**Redis Cache Operations** (directly operate on Redis cache):
+```go
+// Store to Redis
+err := dbkit.RedisCacheSet("session", "key1", "value1", 30*time.Minute)
+
+// Get from Redis
+val, ok, err := dbkit.RedisCacheGet("session", "key1")
+
+// Delete Redis key
+err = dbkit.RedisCacheDelete("session", "key1")
+
+// Clear Redis repository
+err = dbkit.RedisCacheClearRepository("session")
+
+// View Redis status
+status, err := dbkit.RedisCacheStatus()
+```
+
+#### 5. Clear All Caches
 
 ```go
+// Clear all local cache repositories
+dbkit.LocalCacheClearAll()
+
+// Clear all Redis cache repositories
+err := dbkit.RedisCacheClearAll()
+if err != nil {
+    log.Printf("Clear failed: %v", err)
+}
+
+// Clear all default cache repositories
+dbkit.ClearAllCaches()
+```
+
+#### 6. View Cache Status
+
+```go
+// View default cache status
 status := dbkit.CacheStatus()
 fmt.Printf("Type: %v\n", status["type"])
 fmt.Printf("Total Items: %v\n", status["total_items"])
 fmt.Printf("Estimated Memory: %v\n", status["estimated_memory_human"])
+
+// View local cache status
+localStatus := dbkit.LocalCacheStatus()
+fmt.Printf("Local cache items: %v\n", localStatus["total_items"])
+
+// View Redis cache status
+redisStatus, err := dbkit.RedisCacheStatus()
+if err == nil {
+    fmt.Printf("Redis address: %v\n", redisStatus["address"])
+    fmt.Printf("Database size: %v\n", redisStatus["db_size"])
+}
 ```
+
+#### 7. Performance Comparison
+
+| Cache Type | Latency | Throughput | Distributed | Use Case |
+|-----------|---------|------------|-------------|----------|
+| Local Cache | ~1μs | Very High | ✗ | Config, dictionary, single instance |
+| Redis Cache | ~1ms | High | ✓ | Business data, multi-instance |
+
+For more examples, see: [examples/cache_local_redis](examples/cache_local_redis)
 
 ### 6. Auto Timestamps
 

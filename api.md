@@ -1554,71 +1554,347 @@ func PaginateModel[T IDbModel](model T, cache *ModelCache, page, pageSize int, w
 
 ## 缓存操作
 
-### SetCache
-```go
-func SetCache(c CacheProvider)
-```
-设置全局缓存提供者。
+DBKit 提供灵活的缓存策略，支持本地缓存和 Redis 缓存。
 
-### GetCache
+### 缓存初始化
+
+#### InitLocalCache
+```go
+func InitLocalCache(cleanupInterval time.Duration)
+```
+初始化本地缓存实例，设置清理间隔。
+
+**示例:**
+```go
+dbkit.InitLocalCache(1 * time.Minute)
+```
+
+#### InitRedisCache
+```go
+func InitRedisCache(provider CacheProvider)
+```
+初始化 Redis 缓存实例。
+
+**示例:**
+```go
+import "github.com/zzguang83325/dbkit/redis"
+
+rc, err := redis.NewRedisCache("localhost:6379", "", "password", 0)
+if err != nil {
+    panic(err)
+}
+dbkit.InitRedisCache(rc)
+```
+
+#### SetDefaultCache
+```go
+func SetDefaultCache(c CacheProvider)
+```
+设置默认缓存提供者。
+
+**示例:**
+```go
+dbkit.SetDefaultCache(rc) // 切换默认缓存为 Redis
+```
+
+#### GetCache
 ```go
 func GetCache() CacheProvider
 ```
-获取当前缓存提供者。
+获取当前默认缓存提供者。
 
-### SetLocalCacheConfig
+#### GetLocalCacheInstance
 ```go
-func SetLocalCacheConfig(cleanupInterval time.Duration)
+func GetLocalCacheInstance() CacheProvider
 ```
-配置本地缓存清理间隔。
+获取本地缓存实例。
 
-### CreateCache
+#### GetRedisCacheInstance
 ```go
-func CreateCache(cacheRepositoryName string, ttl time.Duration)
+func GetRedisCacheInstance() CacheProvider
 ```
-创建命名缓存并设置默认 TTL。
+获取 Redis 缓存实例。
 
-### CacheSet
-```go
-func CacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration)
-```
-设置缓存值。
+### 缓存查询（链式调用）
 
-### CacheGet
-```go
-func CacheGet(cacheRepositoryName, key string) (interface{}, bool)
-```
-获取缓存值。
-
-### CacheDelete
-```go
-func CacheDelete(cacheRepositoryName, key string)
-```
-删除缓存键。
-
-### CacheClear
-```go
-func CacheClear(cacheRepositoryName string)
-```
-清空指定缓存。
-
-### CacheStatus
-```go
-func CacheStatus() map[string]interface{}
-```
-获取缓存状态信息。
-
-### Cache (链式调用)
+#### Cache
 ```go
 func Cache(name string, ttl ...time.Duration) *DB
 func (db *DB) Cache(name string, ttl ...time.Duration) *DB
 func (tx *Tx) Cache(name string, ttl ...time.Duration) *Tx
 ```
-为查询启用缓存。
+使用默认缓存创建查询构建器。
 
 **示例:**
 ```go
 records, err := dbkit.Cache("user_cache", 5*time.Minute).Query("SELECT * FROM users")
+```
+
+#### LocalCache
+```go
+func LocalCache(cacheRepositoryName string, ttl ...time.Duration) *DB
+```
+创建使用本地缓存的查询构建器。
+
+**示例:**
+```go
+user, _ := dbkit.LocalCache("user_cache").QueryFirst("SELECT * FROM users WHERE id = ?", 1)
+```
+
+#### RedisCache
+```go
+func RedisCache(cacheRepositoryName string, ttl ...time.Duration) *DB
+```
+创建使用 Redis 缓存的查询构建器。
+
+**示例:**
+```go
+orders, _ := dbkit.RedisCache("order_cache").Query("SELECT * FROM orders WHERE user_id = ?", userId)
+```
+
+### 默认缓存操作
+
+这些函数操作当前的默认缓存（可通过 `SetDefaultCache()` 切换）。
+
+#### CreateCache
+```go
+func CreateCache(cacheRepositoryName string, ttl time.Duration)
+```
+创建命名缓存存储库并设置默认 TTL。
+
+#### CacheSet
+```go
+func CacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration)
+```
+在默认缓存中存储值。
+
+**示例:**
+```go
+dbkit.CacheSet("user_cache", "user:1", userData, 5*time.Minute)
+```
+
+#### CacheGet
+```go
+func CacheGet(cacheRepositoryName, key string) (interface{}, bool)
+```
+从默认缓存中获取值。
+
+**示例:**
+```go
+val, ok := dbkit.CacheGet("user_cache", "user:1")
+```
+
+#### CacheDelete
+```go
+func CacheDelete(cacheRepositoryName, key string)
+```
+从默认缓存中删除指定键。
+
+**示例:**
+```go
+dbkit.CacheDelete("user_cache", "user:1")
+```
+
+#### CacheClearRepository
+```go
+func CacheClearRepository(cacheRepositoryName string)
+```
+清空默认缓存中的指定存储库。
+
+**示例:**
+```go
+dbkit.CacheClearRepository("user_cache")
+```
+
+#### ClearAllCaches
+```go
+func ClearAllCaches()
+```
+清空默认缓存中的所有存储库。
+
+**示例:**
+```go
+dbkit.ClearAllCaches()
+```
+
+#### CacheStatus
+```go
+func CacheStatus() map[string]interface{}
+```
+获取默认缓存的状态信息。
+
+**示例:**
+```go
+status := dbkit.CacheStatus()
+fmt.Printf("缓存类型: %v\n", status["type"])
+fmt.Printf("缓存项数: %v\n", status["total_items"])
+```
+
+### 本地缓存操作
+
+这些函数直接操作本地缓存，不受 `SetDefaultCache()` 影响。
+
+#### LocalCacheSet
+```go
+func LocalCacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration)
+```
+在本地缓存中存储值。
+
+**示例:**
+```go
+dbkit.LocalCacheSet("config_cache", "app_name", "MyApp", 10*time.Minute)
+```
+
+#### LocalCacheGet
+```go
+func LocalCacheGet(cacheRepositoryName, key string) (interface{}, bool)
+```
+从本地缓存中获取值。
+
+**示例:**
+```go
+val, ok := dbkit.LocalCacheGet("config_cache", "app_name")
+```
+
+#### LocalCacheDelete
+```go
+func LocalCacheDelete(cacheRepositoryName, key string)
+```
+从本地缓存中删除指定键。
+
+**示例:**
+```go
+dbkit.LocalCacheDelete("config_cache", "app_name")
+```
+
+#### LocalCacheClearRepository
+```go
+func LocalCacheClearRepository(cacheRepositoryName string)
+```
+清空本地缓存中的指定存储库。
+
+**示例:**
+```go
+dbkit.LocalCacheClearRepository("config_cache")
+```
+
+#### LocalCacheClearAll
+```go
+func LocalCacheClearAll()
+```
+清空本地缓存中的所有存储库。
+
+**示例:**
+```go
+dbkit.LocalCacheClearAll()
+```
+
+#### LocalCacheStatus
+```go
+func LocalCacheStatus() map[string]interface{}
+```
+获取本地缓存的状态信息。
+
+**示例:**
+```go
+status := dbkit.LocalCacheStatus()
+fmt.Printf("本地缓存类型: %v\n", status["type"])
+fmt.Printf("内存使用: %v\n", status["estimated_memory_human"])
+```
+
+### Redis 缓存操作
+
+这些函数直接操作 Redis 缓存，不受 `SetDefaultCache()` 影响。
+
+**注意：** 使用前必须先调用 `InitRedisCache()` 初始化。
+
+#### RedisCacheSet
+```go
+func RedisCacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration) error
+```
+在 Redis 缓存中存储值。
+
+**示例:**
+```go
+err := dbkit.RedisCacheSet("session_cache", "session:abc123", sessionData, 30*time.Minute)
+if err != nil {
+    log.Printf("存储失败: %v", err)
+}
+```
+
+#### RedisCacheGet
+```go
+func RedisCacheGet(cacheRepositoryName, key string) (interface{}, bool, error)
+```
+从 Redis 缓存中获取值。
+
+**示例:**
+```go
+val, ok, err := dbkit.RedisCacheGet("session_cache", "session:abc123")
+if err != nil {
+    log.Printf("获取失败: %v", err)
+} else if ok {
+    fmt.Println("会话数据:", val)
+}
+```
+
+#### RedisCacheDelete
+```go
+func RedisCacheDelete(cacheRepositoryName, key string) error
+```
+从 Redis 缓存中删除指定键。
+
+**示例:**
+```go
+err := dbkit.RedisCacheDelete("session_cache", "session:abc123")
+if err != nil {
+    log.Printf("删除失败: %v", err)
+}
+```
+
+#### RedisCacheClearRepository
+```go
+func RedisCacheClearRepository(cacheRepositoryName string) error
+```
+清空 Redis 缓存中的指定存储库。
+
+**示例:**
+```go
+err := dbkit.RedisCacheClearRepository("session_cache")
+if err != nil {
+    log.Printf("清空失败: %v", err)
+}
+```
+
+#### RedisCacheClearAll
+```go
+func RedisCacheClearAll() error
+```
+清空 Redis 缓存中的所有 dbkit 相关缓存。
+
+**示例:**
+```go
+err := dbkit.RedisCacheClearAll()
+if err != nil {
+    log.Printf("清空失败: %v", err)
+}
+```
+
+#### RedisCacheStatus
+```go
+func RedisCacheStatus() (map[string]interface{}, error)
+```
+获取 Redis 缓存的状态信息。
+
+**示例:**
+```go
+status, err := dbkit.RedisCacheStatus()
+if err != nil {
+    log.Printf("获取状态失败: %v", err)
+} else {
+    fmt.Printf("Redis 地址: %v\n", status["address"])
+    fmt.Printf("数据库大小: %v\n", status["db_size"])
+}
 ```
 
 ### CacheProvider 接口
@@ -1627,8 +1903,78 @@ type CacheProvider interface {
     CacheGet(cacheRepositoryName, key string) (interface{}, bool)
     CacheSet(cacheRepositoryName, key string, value interface{}, ttl time.Duration)
     CacheDelete(cacheRepositoryName, key string)
-    CacheClear(cacheRepositoryName string)
+    CacheClearRepository(cacheRepositoryName string)
     Status() map[string]interface{}
+}
+```
+
+### 使用场景示例
+
+#### 场景 1：只使用默认缓存
+```go
+// 使用默认的本地缓存
+dbkit.CacheSet("user_cache", "user:1", userData)
+val, _ := dbkit.CacheGet("user_cache", "user:1")
+
+// 或者切换为 Redis
+rc, _ := redis.NewRedisCache("localhost:6379", "", "", 0)
+dbkit.SetDefaultCache(rc)
+
+// 现在操作的是 Redis
+dbkit.CacheSet("user_cache", "user:2", userData)
+```
+
+#### 场景 2：同时使用本地缓存和 Redis
+```go
+// 初始化 Redis
+rc, _ := redis.NewRedisCache("localhost:6379", "", "", 0)
+dbkit.InitRedisCache(rc)
+
+// 配置数据存本地（快速访问）
+dbkit.LocalCacheSet("config", "app_name", "MyApp")
+
+// 会话数据存 Redis（分布式共享）
+dbkit.RedisCacheSet("session", "session:123", sessionData)
+
+// 两个缓存互不影响
+config, _ := dbkit.LocalCacheGet("config", "app_name")
+session, _, _ := dbkit.RedisCacheGet("session", "session:123")
+```
+
+#### 场景 3：缓存分层管理
+```go
+// L1 缓存：本地缓存（配置数据）
+func GetConfig(key string) string {
+    val, ok := dbkit.LocalCacheGet("config", key)
+    if ok {
+        return val.(string)
+    }
+    
+    // 从数据库加载
+    value := loadFromDB(key)
+    dbkit.LocalCacheSet("config", key, value, 1*time.Hour)
+    return value
+}
+
+// L2 缓存：Redis 缓存（业务数据）
+func GetUser(userID int) (*User, error) {
+    key := fmt.Sprintf("user:%d", userID)
+    val, ok, err := dbkit.RedisCacheGet("users", key)
+    if err != nil {
+        return nil, err
+    }
+    if ok {
+        return val.(*User), nil
+    }
+    
+    // 从数据库加载
+    user, err := loadUserFromDB(userID)
+    if err != nil {
+        return nil, err
+    }
+    
+    dbkit.RedisCacheSet("users", key, user, 5*time.Minute)
+    return user, nil
 }
 ```
 

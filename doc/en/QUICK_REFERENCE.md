@@ -194,7 +194,7 @@ count, err := dbkit.Cache("user_count").Count("users", "age > ?", 25)
 dbkit.CacheSet("store", "key", "value")
 val, ok := dbkit.CacheGet("store", "key")
 dbkit.CacheDelete("store", "key")
-dbkit.CacheClear("store")
+dbkit.CacheClearRepository("store")
 
 // Cache status
 status := dbkit.CacheStatus()

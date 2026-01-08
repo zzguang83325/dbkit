@@ -191,7 +191,7 @@ func main() {
 	dbkit.CacheSet("api_cache", "key_2", "data_2")
 	fmt.Println("  已设置 key_1 和 key_2")
 
-	dbkit.CacheClear("api_cache")
+	dbkit.CacheClearRepository("api_cache")
 	fmt.Println("  ✓ api_cache 库下的所有 Key 已被清理")
 
 	if _, ok := dbkit.CacheGet("api_cache", "key_1"); !ok {

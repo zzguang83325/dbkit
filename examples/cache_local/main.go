@@ -177,7 +177,7 @@ func main() {
 	}
 
 	dbkit.CacheSet("user_store", "user_3", "王五")
-	dbkit.CacheClear("user_store")
+	dbkit.CacheClearRepository("user_store")
 	if _, ok := dbkit.CacheGet("user_store", "user_3"); !ok {
 		fmt.Println("  ✓ user_store 已全部清空")
 	}

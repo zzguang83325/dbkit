@@ -73,6 +73,7 @@ type DB struct {
 	cacheRepositoryName string
 	cacheTTL            time.Duration
 	timeout             time.Duration // Query timeout for this instance
+	cacheProvider       CacheProvider // 指定的缓存提供者（nil 表示使用默认缓存）
 }
 
 // GetConfig returns the database configuration
@@ -101,6 +102,15 @@ func (db *DB) getContext() (context.Context, context.CancelFunc) {
 		return context.WithTimeout(context.Background(), timeout)
 	}
 	return context.Background(), func() {}
+}
+
+// getEffectiveCache 获取当前有效的缓存提供者
+// 如果 DB 实例指定了缓存提供者，则使用指定的；否则使用全局默认缓存
+func (db *DB) getEffectiveCache() CacheProvider {
+	if db.cacheProvider != nil {
+		return db.cacheProvider
+	}
+	return GetCache()
 }
 
 // Tx represents a database transaction with chainable methods

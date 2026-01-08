@@ -336,8 +336,9 @@ func (db *DB) Query(querySQL string, args ...interface{}) ([]Record, error) {
 	defer cancel()
 
 	if db.cacheRepositoryName != "" {
+		cache := db.getEffectiveCache()
 		key := GenerateCacheKey(db.dbMgr.name, querySQL, args...)
-		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
+		if val, ok := cache.CacheGet(db.cacheRepositoryName, key); ok {
 			var results []Record
 			if convertCacheValue(val, &results) {
 				return results, nil
@@ -345,7 +346,7 @@ func (db *DB) Query(querySQL string, args ...interface{}) ([]Record, error) {
 		}
 		results, err := db.dbMgr.queryWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 		if err == nil {
-			GetCache().CacheSet(db.cacheRepositoryName, key, results, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
+			cache.CacheSet(db.cacheRepositoryName, key, results, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 		}
 		return results, err
 	}
@@ -360,8 +361,9 @@ func (db *DB) QueryFirst(querySQL string, args ...interface{}) (*Record, error) 
 	defer cancel()
 
 	if db.cacheRepositoryName != "" {
+		cache := db.getEffectiveCache()
 		key := GenerateCacheKey(db.dbMgr.name, querySQL, args...)
-		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
+		if val, ok := cache.CacheGet(db.cacheRepositoryName, key); ok {
 			var result *Record
 			if convertCacheValue(val, &result) {
 				return result, nil
@@ -369,7 +371,7 @@ func (db *DB) QueryFirst(querySQL string, args ...interface{}) (*Record, error) 
 		}
 		result, err := db.dbMgr.queryFirstWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 		if err == nil && result != nil {
-			GetCache().CacheSet(db.cacheRepositoryName, key, result, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
+			cache.CacheSet(db.cacheRepositoryName, key, result, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 		}
 		return result, err
 	}
@@ -403,8 +405,9 @@ func (db *DB) QueryMap(querySQL string, args ...interface{}) ([]map[string]inter
 	defer cancel()
 
 	if db.cacheRepositoryName != "" {
+		cache := db.getEffectiveCache()
 		key := GenerateCacheKey(db.dbMgr.name, querySQL, args...)
-		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
+		if val, ok := cache.CacheGet(db.cacheRepositoryName, key); ok {
 			var results []map[string]interface{}
 			if convertCacheValue(val, &results) {
 				return results, nil
@@ -412,7 +415,7 @@ func (db *DB) QueryMap(querySQL string, args ...interface{}) ([]map[string]inter
 		}
 		results, err := db.dbMgr.queryMapWithContext(ctx, db.dbMgr.getDB(), querySQL, args...)
 		if err == nil {
-			GetCache().CacheSet(db.cacheRepositoryName, key, results, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
+			cache.CacheSet(db.cacheRepositoryName, key, results, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 		}
 		return results, err
 	}
@@ -551,8 +554,9 @@ func (db *DB) Count(table string, whereSql string, whereArgs ...interface{}) (in
 		return 0, db.lastErr
 	}
 	if db.cacheRepositoryName != "" {
+		cache := db.getEffectiveCache()
 		key := GenerateCacheKey(db.dbMgr.name, "COUNT:"+table+":"+whereSql, whereArgs...)
-		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
+		if val, ok := cache.CacheGet(db.cacheRepositoryName, key); ok {
 			var count int64
 			if convertCacheValue(val, &count) {
 				return count, nil
@@ -560,7 +564,7 @@ func (db *DB) Count(table string, whereSql string, whereArgs ...interface{}) (in
 		}
 		count, err := db.dbMgr.count(db.dbMgr.getDB(), table, whereSql, whereArgs...)
 		if err == nil {
-			GetCache().CacheSet(db.cacheRepositoryName, key, count, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
+			cache.CacheSet(db.cacheRepositoryName, key, count, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 		}
 		return count, err
 	}
@@ -606,8 +610,9 @@ func (db *DB) PaginateBuilder(page int, pageSize int, selectSql string, table st
 	}
 
 	if db.cacheRepositoryName != "" {
+		cache := db.getEffectiveCache()
 		key := GenerateCacheKey(db.dbMgr.name, "PAGINATE:"+querySQL, args...)
-		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
+		if val, ok := cache.CacheGet(db.cacheRepositoryName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
@@ -616,7 +621,7 @@ func (db *DB) PaginateBuilder(page int, pageSize int, selectSql string, table st
 		list, totalRow, err := db.dbMgr.paginate(db.dbMgr.getDB(), querySQL, page, pageSize, args...)
 		if err == nil {
 			pageObj := NewPage(list, page, pageSize, totalRow)
-			GetCache().CacheSet(db.cacheRepositoryName, key, pageObj, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
+			cache.CacheSet(db.cacheRepositoryName, key, pageObj, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 			return pageObj, nil
 		}
 		return nil, err
@@ -637,8 +642,9 @@ func (db *DB) Paginate(page int, pageSize int, querySQL string, args ...interfac
 	}
 
 	if db.cacheRepositoryName != "" {
+		cache := db.getEffectiveCache()
 		key := GenerateCacheKey(db.dbMgr.name, "PAGINATE_SQL:"+querySQL, args...)
-		if val, ok := GetCache().CacheGet(db.cacheRepositoryName, key); ok {
+		if val, ok := cache.CacheGet(db.cacheRepositoryName, key); ok {
 			var pageObj *Page[Record]
 			if convertCacheValue(val, &pageObj) {
 				return pageObj, nil
@@ -647,7 +653,7 @@ func (db *DB) Paginate(page int, pageSize int, querySQL string, args ...interfac
 		list, totalRow, err := db.dbMgr.paginate(db.dbMgr.getDB(), querySQL, page, pageSize, args...)
 		if err == nil {
 			pageObj := NewPage(list, page, pageSize, totalRow)
-			GetCache().CacheSet(db.cacheRepositoryName, key, pageObj, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
+			cache.CacheSet(db.cacheRepositoryName, key, pageObj, getEffectiveTTL(db.cacheRepositoryName, db.cacheTTL))
 			return pageObj, nil
 		}
 		return nil, err

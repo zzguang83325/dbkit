@@ -1526,42 +1526,70 @@ users, err := dbkit.SqlTemplate("searchUsers", params).Query()
 4. **参数验证** - 系统自动验证参数数量和类型
 5. **错误处理** - 捕获并处理 `SqlConfigError` 类型的错误
 
-### 缓存支持 (Caching)
+### 缓存支持
 
-`dbkit` 默认使用内置的 **LocalCache**（内存缓存）。如果需要使用 Redis，可以按需引入 `dbkit/redis` 子包。
+DBKit 提供灵活的缓存策略，支持本地缓存和 Redis 缓存，你可以根据场景自由选择。
 
-#### 1. 使用内置 LocalCache (内存)
+#### 1. 三种缓存使用方式
+
 ```go
-// 默认使用内存，可通过以下函数修改缓存数据清理间隔时间,会定期清理超期的缓存数据
-dbkit.SetLocalCacheConfig(1 * time.Minute)
+// 方式 1：显式使用本地缓存（速度最快，单实例）
+user, _ := dbkit.LocalCache("user_cache").QueryFirst("SELECT * FROM users WHERE id = ?", 1)
+
+// 方式 2：显式使用 Redis 缓存（分布式共享）
+order, _ := dbkit.RedisCache("order_cache").Query("SELECT * FROM orders WHERE user_id = ?", userId)
+
+// 方式 3：使用默认缓存（默认为本地缓存，可通过 SetDefaultCache 切换）
+data, _ := dbkit.Cache("default_cache").QueryFirst("SELECT * FROM configs WHERE key = ?", key)
 ```
 
-#### 2. 使用 Redis 缓存 (按需引入)
-首先确保你的项目中引入了 `dbkit/redis` 子包，这会拉取 Redis 相关依赖。
+#### 2. 初始化缓存
 
 ```go
+// 本地缓存（已默认初始化，可选配置清理间隔）
+dbkit.InitLocalCache(1 * time.Minute)
+
+// Redis 缓存（需要先引入 dbkit/redis 子包）
 import "github.com/zzguang83325/dbkit/redis"
 
-// 创建 Redis 缓存实例 (参数：地址, 用户名, 密码, DB)
-rc, err := redis.NewRedisCache("localhost:6379", "username", "password", 1)
-if err == nil {
-    dbkit.SetDefaultCache(rc) // 切换全局缓存为 Redis
+rc, err := redis.NewRedisCache("localhost:6379", "", "password", 0)
+if err != nil {
+    panic(err)
+}
+dbkit.InitRedisCache(rc)
+
+// 可选：切换默认缓存为 Redis
+dbkit.SetDefaultCache(rc)
+```
+
+#### 3. 使用场景
+
+```go
+// 场景 1：配置数据用本地缓存（快速访问，很少变化）
+configs, _ := dbkit.LocalCache("config_cache", 10*time.Minute).
+    Query("SELECT * FROM configs")
+
+// 场景 2：业务数据用 Redis 缓存（多实例共享）
+orders, _ := dbkit.RedisCache("order_cache", 5*time.Minute).
+    Query("SELECT * FROM orders WHERE user_id = ?", userId)
+
+// 场景 3：混合使用
+func GetDashboardData(userID int) (*Dashboard, error) {
+    // 配置用本地缓存
+    configs, _ := dbkit.LocalCache("configs").Query("SELECT * FROM configs")
+    
+    // 用户数据用 Redis
+    user, _ := dbkit.RedisCache("users").QueryFirst("SELECT * FROM users WHERE id = ?", userID)
+    
+    return &Dashboard{Configs: configs, User: user}, nil
 }
 ```
 
-#### 3. 数据查询并自动缓存
-```go
-// 创建一个缓存库, 并设置默认过期时长
-dbkit.CreateCache("user_cache", 10*time.Minute)
+#### 4. 手动缓存操作
 
-// 自动查询缓存: 链式调用 Cache()
-// 如果缓存命中则直接返回，否则查询数据库并自动写入缓存
-var users []dbkit.Record
-err := dbkit.Cache("user_cache").Query("SELECT * FROM users")
-```
+DBKit 提供三套缓存操作函数：
 
-#### 8.3 手动缓存操作
-
+**默认缓存操作**（操作当前默认缓存）：
 ```go
 // 存储缓存
 dbkit.CacheSet("my_store", "key1", "value1", 5*time.Minute)
@@ -1572,18 +1600,94 @@ val, ok := dbkit.CacheGet("my_store", "key1")
 // 删除指定键
 dbkit.CacheDelete("my_store", "key1")
 
-// 清空整个存储库
-dbkit.CacheClear("my_store")
+// 清空指定存储库
+dbkit.CacheClearRepository("my_store")
+
+// 查看状态
+status := dbkit.CacheStatus()
 ```
 
-#### 8.4 查看缓存状态
+**本地缓存操作**（直接操作本地缓存）：
+```go
+// 存储到本地缓存
+dbkit.LocalCacheSet("config", "key1", "value1", 10*time.Minute)
+
+// 从本地缓存获取
+val, ok := dbkit.LocalCacheGet("config", "key1")
+
+// 删除本地缓存键
+dbkit.LocalCacheDelete("config", "key1")
+
+// 清空本地缓存存储库
+dbkit.LocalCacheClearRepository("config")
+
+// 查看本地缓存状态
+status := dbkit.LocalCacheStatus()
+```
+
+**Redis 缓存操作**（直接操作 Redis 缓存）：
+```go
+// 存储到 Redis
+err := dbkit.RedisCacheSet("session", "key1", "value1", 30*time.Minute)
+
+// 从 Redis 获取
+val, ok, err := dbkit.RedisCacheGet("session", "key1")
+
+// 删除 Redis 键
+err = dbkit.RedisCacheDelete("session", "key1")
+
+// 清空 Redis 存储库
+err = dbkit.RedisCacheClearRepository("session")
+
+// 查看 Redis 状态
+status, err := dbkit.RedisCacheStatus()
+```
+
+#### 5. 清空所有缓存
 
 ```go
+// 清空本地缓存的所有存储库
+dbkit.LocalCacheClearAll()
+
+// 清空 Redis 缓存的所有存储库
+err := dbkit.RedisCacheClearAll()
+if err != nil {
+    log.Printf("清空失败: %v", err)
+}
+
+// 清空默认缓存的所有存储库
+dbkit.ClearAllCaches()
+```
+
+#### 6. 查看缓存状态
+
+```go
+// 查看默认缓存状态
 status := dbkit.CacheStatus()
 fmt.Printf("类型: %v\n", status["type"])
-fmt.Printf("项数: %v\n", status["total_items"])
+fmt.Printf("总项数: %v\n", status["total_items"])
 fmt.Printf("内存: %v\n", status["estimated_memory_human"])
+
+// 查看本地缓存状态
+localStatus := dbkit.LocalCacheStatus()
+fmt.Printf("本地缓存项数: %v\n", localStatus["total_items"])
+
+// 查看 Redis 缓存状态
+redisStatus, err := dbkit.RedisCacheStatus()
+if err == nil {
+    fmt.Printf("Redis 地址: %v\n", redisStatus["address"])
+    fmt.Printf("数据库大小: %v\n", redisStatus["db_size"])
+}
 ```
+
+#### 7. 性能对比
+
+| 缓存类型 | 延迟 | 吞吐量 | 分布式 | 使用场景 |
+|---------|------|--------|--------|----------|
+| 本地缓存 | ~1μs | 极高 | ✗ | 配置、字典、单实例 |
+| Redis 缓存 | ~1ms | 高 | ✓ | 业务数据、多实例 |
+
+更多示例请参考：[examples/cache_local_redis](examples/cache_local_redis)
 
 
 

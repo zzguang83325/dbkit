@@ -76,12 +76,28 @@ func (r *redisCache) CacheSet(cacheRepositoryName, key string, value interface{}
 }
 
 func (r *redisCache) CacheDelete(cacheRepositoryName, key string) {
+	if cacheRepositoryName == "" || key == "" {
+		return // 忽略空参数
+	}
 	fullKey := fmt.Sprintf("dbkit:%s:%s", cacheRepositoryName, key)
 	r.client.Del(r.ctx, fullKey)
 }
 
-func (r *redisCache) CacheClear(cacheRepositoryName string) {
+// CacheClearRepository 清空指定存储库的所有缓存
+func (r *redisCache) CacheClearRepository(cacheRepositoryName string) {
+	if cacheRepositoryName == "" {
+		return // 忽略空字符串，避免误删除所有缓存
+	}
 	pattern := fmt.Sprintf("dbkit:%s:*", cacheRepositoryName)
+	iter := r.client.Scan(r.ctx, 0, pattern, 0).Iterator()
+	for iter.Next(r.ctx) {
+		r.client.Del(r.ctx, iter.Val())
+	}
+}
+
+// ClearAll 清空所有 dbkit 相关的缓存
+func (r *redisCache) ClearAll() {
+	pattern := "dbkit:*"
 	iter := r.client.Scan(r.ctx, 0, pattern, 0).Iterator()
 	for iter.Next(r.ctx) {
 		r.client.Del(r.ctx, iter.Val())

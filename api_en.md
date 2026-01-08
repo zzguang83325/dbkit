@@ -1553,71 +1553,347 @@ func PaginateModel[T IDbModel](model T, cache *ModelCache, page, pageSize int, w
 
 ## Cache Operations
 
-### SetCache
-```go
-func SetCache(c CacheProvider)
-```
-Set global cache provider.
+DBKit provides flexible caching strategies, supporting both local cache and Redis cache.
 
-### GetCache
+### Cache Initialization
+
+#### InitLocalCache
+```go
+func InitLocalCache(cleanupInterval time.Duration)
+```
+Initialize local cache instance with cleanup interval.
+
+**Example:**
+```go
+dbkit.InitLocalCache(1 * time.Minute)
+```
+
+#### InitRedisCache
+```go
+func InitRedisCache(provider CacheProvider)
+```
+Initialize Redis cache instance.
+
+**Example:**
+```go
+import "github.com/zzguang83325/dbkit/redis"
+
+rc, err := redis.NewRedisCache("localhost:6379", "", "password", 0)
+if err != nil {
+    panic(err)
+}
+dbkit.InitRedisCache(rc)
+```
+
+#### SetDefaultCache
+```go
+func SetDefaultCache(c CacheProvider)
+```
+Set default cache provider.
+
+**Example:**
+```go
+dbkit.SetDefaultCache(rc) // Switch default cache to Redis
+```
+
+#### GetCache
 ```go
 func GetCache() CacheProvider
 ```
-Get current cache provider.
+Get current default cache provider.
 
-### SetLocalCacheConfig
+#### GetLocalCacheInstance
 ```go
-func SetLocalCacheConfig(cleanupInterval time.Duration)
+func GetLocalCacheInstance() CacheProvider
 ```
-Configure local cache cleanup interval.
+Get local cache instance.
 
-### CreateCache
+#### GetRedisCacheInstance
 ```go
-func CreateCache(cacheRepositoryName string, ttl time.Duration)
+func GetRedisCacheInstance() CacheProvider
 ```
-Create named cache and set default TTL.
+Get Redis cache instance.
 
-### CacheSet
-```go
-func CacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration)
-```
-Set cache value.
+### Cache Query (Chain Call)
 
-### CacheGet
-```go
-func CacheGet(cacheRepositoryName, key string) (interface{}, bool)
-```
-Get cache value.
-
-### CacheDelete
-```go
-func CacheDelete(cacheRepositoryName, key string)
-```
-Delete cache key.
-
-### CacheClear
-```go
-func CacheClear(cacheRepositoryName string)
-```
-Clear specified cache.
-
-### CacheStatus
-```go
-func CacheStatus() map[string]interface{}
-```
-Get cache status information.
-
-### Cache (Chain Call)
+#### Cache
 ```go
 func Cache(name string, ttl ...time.Duration) *DB
 func (db *DB) Cache(name string, ttl ...time.Duration) *DB
 func (tx *Tx) Cache(name string, ttl ...time.Duration) *Tx
 ```
-Enable cache for query.
+Create query builder using default cache.
 
 **Example:**
 ```go
 records, err := dbkit.Cache("user_cache", 5*time.Minute).Query("SELECT * FROM users")
+```
+
+#### LocalCache
+```go
+func LocalCache(cacheRepositoryName string, ttl ...time.Duration) *DB
+```
+Create query builder using local cache.
+
+**Example:**
+```go
+user, _ := dbkit.LocalCache("user_cache").QueryFirst("SELECT * FROM users WHERE id = ?", 1)
+```
+
+#### RedisCache
+```go
+func RedisCache(cacheRepositoryName string, ttl ...time.Duration) *DB
+```
+Create query builder using Redis cache.
+
+**Example:**
+```go
+orders, _ := dbkit.RedisCache("order_cache").Query("SELECT * FROM orders WHERE user_id = ?", userId)
+```
+
+### Default Cache Operations
+
+These functions operate on the current default cache (switchable via `SetDefaultCache()`).
+
+#### CreateCache
+```go
+func CreateCache(cacheRepositoryName string, ttl time.Duration)
+```
+Create named cache repository and set default TTL.
+
+#### CacheSet
+```go
+func CacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration)
+```
+Store value in default cache.
+
+**Example:**
+```go
+dbkit.CacheSet("user_cache", "user:1", userData, 5*time.Minute)
+```
+
+#### CacheGet
+```go
+func CacheGet(cacheRepositoryName, key string) (interface{}, bool)
+```
+Get value from default cache.
+
+**Example:**
+```go
+val, ok := dbkit.CacheGet("user_cache", "user:1")
+```
+
+#### CacheDelete
+```go
+func CacheDelete(cacheRepositoryName, key string)
+```
+Delete specific key from default cache.
+
+**Example:**
+```go
+dbkit.CacheDelete("user_cache", "user:1")
+```
+
+#### CacheClearRepository
+```go
+func CacheClearRepository(cacheRepositoryName string)
+```
+Clear specific repository in default cache.
+
+**Example:**
+```go
+dbkit.CacheClearRepository("user_cache")
+```
+
+#### ClearAllCaches
+```go
+func ClearAllCaches()
+```
+Clear all repositories in default cache.
+
+**Example:**
+```go
+dbkit.ClearAllCaches()
+```
+
+#### CacheStatus
+```go
+func CacheStatus() map[string]interface{}
+```
+Get default cache status information.
+
+**Example:**
+```go
+status := dbkit.CacheStatus()
+fmt.Printf("Cache type: %v\n", status["type"])
+fmt.Printf("Total items: %v\n", status["total_items"])
+```
+
+### Local Cache Operations
+
+These functions directly operate on local cache, unaffected by `SetDefaultCache()`.
+
+#### LocalCacheSet
+```go
+func LocalCacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration)
+```
+Store value in local cache.
+
+**Example:**
+```go
+dbkit.LocalCacheSet("config_cache", "app_name", "MyApp", 10*time.Minute)
+```
+
+#### LocalCacheGet
+```go
+func LocalCacheGet(cacheRepositoryName, key string) (interface{}, bool)
+```
+Get value from local cache.
+
+**Example:**
+```go
+val, ok := dbkit.LocalCacheGet("config_cache", "app_name")
+```
+
+#### LocalCacheDelete
+```go
+func LocalCacheDelete(cacheRepositoryName, key string)
+```
+Delete specific key from local cache.
+
+**Example:**
+```go
+dbkit.LocalCacheDelete("config_cache", "app_name")
+```
+
+#### LocalCacheClearRepository
+```go
+func LocalCacheClearRepository(cacheRepositoryName string)
+```
+Clear specific repository in local cache.
+
+**Example:**
+```go
+dbkit.LocalCacheClearRepository("config_cache")
+```
+
+#### LocalCacheClearAll
+```go
+func LocalCacheClearAll()
+```
+Clear all repositories in local cache.
+
+**Example:**
+```go
+dbkit.LocalCacheClearAll()
+```
+
+#### LocalCacheStatus
+```go
+func LocalCacheStatus() map[string]interface{}
+```
+Get local cache status information.
+
+**Example:**
+```go
+status := dbkit.LocalCacheStatus()
+fmt.Printf("Local cache type: %v\n", status["type"])
+fmt.Printf("Memory usage: %v\n", status["estimated_memory_human"])
+```
+
+### Redis Cache Operations
+
+These functions directly operate on Redis cache, unaffected by `SetDefaultCache()`.
+
+**Note:** Must call `InitRedisCache()` to initialize before use.
+
+#### RedisCacheSet
+```go
+func RedisCacheSet(cacheRepositoryName, key string, value interface{}, ttl ...time.Duration) error
+```
+Store value in Redis cache.
+
+**Example:**
+```go
+err := dbkit.RedisCacheSet("session_cache", "session:abc123", sessionData, 30*time.Minute)
+if err != nil {
+    log.Printf("Store failed: %v", err)
+}
+```
+
+#### RedisCacheGet
+```go
+func RedisCacheGet(cacheRepositoryName, key string) (interface{}, bool, error)
+```
+Get value from Redis cache.
+
+**Example:**
+```go
+val, ok, err := dbkit.RedisCacheGet("session_cache", "session:abc123")
+if err != nil {
+    log.Printf("Get failed: %v", err)
+} else if ok {
+    fmt.Println("Session data:", val)
+}
+```
+
+#### RedisCacheDelete
+```go
+func RedisCacheDelete(cacheRepositoryName, key string) error
+```
+Delete specific key from Redis cache.
+
+**Example:**
+```go
+err := dbkit.RedisCacheDelete("session_cache", "session:abc123")
+if err != nil {
+    log.Printf("Delete failed: %v", err)
+}
+```
+
+#### RedisCacheClearRepository
+```go
+func RedisCacheClearRepository(cacheRepositoryName string) error
+```
+Clear specific repository in Redis cache.
+
+**Example:**
+```go
+err := dbkit.RedisCacheClearRepository("session_cache")
+if err != nil {
+    log.Printf("Clear failed: %v", err)
+}
+```
+
+#### RedisCacheClearAll
+```go
+func RedisCacheClearAll() error
+```
+Clear all dbkit-related caches in Redis.
+
+**Example:**
+```go
+err := dbkit.RedisCacheClearAll()
+if err != nil {
+    log.Printf("Clear failed: %v", err)
+}
+```
+
+#### RedisCacheStatus
+```go
+func RedisCacheStatus() (map[string]interface{}, error)
+```
+Get Redis cache status information.
+
+**Example:**
+```go
+status, err := dbkit.RedisCacheStatus()
+if err != nil {
+    log.Printf("Get status failed: %v", err)
+} else {
+    fmt.Printf("Redis address: %v\n", status["address"])
+    fmt.Printf("Database size: %v\n", status["db_size"])
+}
 ```
 
 ### CacheProvider Interface
@@ -1626,8 +1902,78 @@ type CacheProvider interface {
     CacheGet(cacheRepositoryName, key string) (interface{}, bool)
     CacheSet(cacheRepositoryName, key string, value interface{}, ttl time.Duration)
     CacheDelete(cacheRepositoryName, key string)
-    CacheClear(cacheRepositoryName string)
+    CacheClearRepository(cacheRepositoryName string)
     Status() map[string]interface{}
+}
+```
+
+### Usage Scenarios
+
+#### Scenario 1: Using Default Cache Only
+```go
+// Use default local cache
+dbkit.CacheSet("user_cache", "user:1", userData)
+val, _ := dbkit.CacheGet("user_cache", "user:1")
+
+// Or switch to Redis
+rc, _ := redis.NewRedisCache("localhost:6379", "", "", 0)
+dbkit.SetDefaultCache(rc)
+
+// Now operating on Redis
+dbkit.CacheSet("user_cache", "user:2", userData)
+```
+
+#### Scenario 2: Using Both Local Cache and Redis
+```go
+// Initialize Redis
+rc, _ := redis.NewRedisCache("localhost:6379", "", "", 0)
+dbkit.InitRedisCache(rc)
+
+// Store config data locally (fast access)
+dbkit.LocalCacheSet("config", "app_name", "MyApp")
+
+// Store session data in Redis (distributed sharing)
+dbkit.RedisCacheSet("session", "session:123", sessionData)
+
+// Two caches are independent
+config, _ := dbkit.LocalCacheGet("config", "app_name")
+session, _, _ := dbkit.RedisCacheGet("session", "session:123")
+```
+
+#### Scenario 3: Layered Cache Management
+```go
+// L1 Cache: Local cache (config data)
+func GetConfig(key string) string {
+    val, ok := dbkit.LocalCacheGet("config", key)
+    if ok {
+        return val.(string)
+    }
+    
+    // Load from database
+    value := loadFromDB(key)
+    dbkit.LocalCacheSet("config", key, value, 1*time.Hour)
+    return value
+}
+
+// L2 Cache: Redis cache (business data)
+func GetUser(userID int) (*User, error) {
+    key := fmt.Sprintf("user:%d", userID)
+    val, ok, err := dbkit.RedisCacheGet("users", key)
+    if err != nil {
+        return nil, err
+    }
+    if ok {
+        return val.(*User), nil
+    }
+    
+    // Load from database
+    user, err := loadUserFromDB(userID)
+    if err != nil {
+        return nil, err
+    }
+    
+    dbkit.RedisCacheSet("users", key, user, 5*time.Minute)
+    return user, nil
 }
 ```
 
