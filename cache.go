@@ -2,6 +2,7 @@ package dbkit
 
 import (
 	"crypto/md5"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -62,9 +63,18 @@ func (lc *localCache) startCleanupTimer() {
 func (lc *localCache) cleanupExpired() {
 	lc.stores.Range(func(name, store interface{}) bool {
 		s := store.(*sync.Map)
+		// 如果是预编译语句缓存，需要在删除前关闭语句
+		isStmtCache := name == "__dbkit_stmt_cache__"
+
 		s.Range(func(key, value interface{}) bool {
 			entry := value.(cacheEntry)
 			if entry.isExpired() {
+				// 如果是预编译语句缓存，关闭语句
+				if isStmtCache {
+					if stmt, ok := entry.value.(*sql.Stmt); ok {
+						stmt.Close()
+					}
+				}
 				s.Delete(key)
 			}
 			return true

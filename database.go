@@ -41,6 +41,12 @@ var (
 	oraclePlaceholderRe    = regexp.MustCompile(`:(\d+)`)
 )
 
+// 预编译语句缓存相关常量
+const (
+	stmtCacheRepository = "__dbkit_stmt_cache__" // 内部使用的缓存名称
+	stmtCacheTTL        = 30 * time.Minute       // 预编译语句缓存时间
+)
+
 // Config holds the database configuration
 type Config struct {
 	Driver          DriverType    // Database driver type (mysql, postgres, sqlite3)
@@ -304,6 +310,64 @@ func (mgr *dbManager) prepareQuerySQL(querySQL string, args ...interface{}) (str
 	return querySQL, args
 }
 
+// getOrPrepareStmt 获取或创建预编译语句（内部方法）
+// 返回值：stmt, fromCache, error
+func (mgr *dbManager) getOrPrepareStmt(sqlStr string) (*sql.Stmt, bool, error) {
+	// 构造缓存键：数据库名称 + SQL 语句
+	// 这样可以确保不同数据库的预编译语句不会冲突
+	cacheKey := mgr.name + ":" + sqlStr
+
+	// 1. 尝试从 localCache 获取
+	if cached, ok := GetLocalCacheInstance().CacheGet(stmtCacheRepository, cacheKey); ok {
+		if stmt, ok := cached.(*sql.Stmt); ok {
+			return stmt, true, nil // 从缓存获取
+		}
+	}
+
+	// 2. 缓存未命中，创建新的预编译语句
+	stmt, err := mgr.db.Prepare(sqlStr)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// 3. 存入 localCache
+	GetLocalCacheInstance().CacheSet(stmtCacheRepository, cacheKey, stmt, stmtCacheTTL)
+
+	return stmt, false, nil // 新创建的
+}
+
+// clearStmtCache 清空预编译语句缓存（内部方法，用于数据库关闭时）
+func (mgr *dbManager) clearStmtCache() {
+	// 获取所有缓存的语句并关闭
+	lc := GetLocalCacheInstance().(*localCache)
+	if store, ok := lc.stores.Load(stmtCacheRepository); ok {
+		s := store.(*sync.Map)
+		s.Range(func(key, value interface{}) bool {
+			if entry, ok := value.(cacheEntry); ok {
+				if stmt, ok := entry.value.(*sql.Stmt); ok {
+					stmt.Close()
+				}
+			}
+			return true
+		})
+	}
+
+	// 清空缓存
+	GetLocalCacheInstance().CacheClearRepository(stmtCacheRepository)
+}
+
+// isStmtInvalidError 检查是否是语句失效错误
+func isStmtInvalidError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "invalid connection") ||
+		strings.Contains(errStr, "bad connection") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "connection reset")
+}
+
 func (mgr *dbManager) query(executor sqlExecutor, querySQL string, args ...interface{}) ([]Record, error) {
 	return mgr.queryWithContext(context.Background(), executor, querySQL, args...)
 }
@@ -315,12 +379,35 @@ func (mgr *dbManager) queryWithContext(ctx context.Context, executor sqlExecutor
 	var rows *sql.Rows
 	var err error
 
-	// Use context version if executor supports it
-	if execCtx, ok := executor.(sqlExecutorContext); ok {
-		rows, err = execCtx.QueryContext(ctx, querySQL, args...)
+	// 只有当 executor 是 *sql.DB 时才使用预编译语句缓存
+	// 事务（*sql.Tx）不使用缓存，因为事务有自己的生命周期
+	if db, ok := executor.(*sql.DB); ok && db == mgr.db {
+		// 使用缓存的预编译语句
+		stmt, fromCache, stmtErr := mgr.getOrPrepareStmt(querySQL)
+		if stmtErr != nil {
+			mgr.logTrace(start, querySQL, args, stmtErr)
+			return nil, stmtErr
+		}
+
+		// 执行查询（使用 context）
+		rows, err = stmt.QueryContext(ctx, args...)
+
+		// 如果执行失败且可能是语句失效，从缓存移除
+		if err != nil && !fromCache {
+			// 新创建的语句出错，不需要特殊处理
+		} else if err != nil && isStmtInvalidError(err) {
+			cacheKey := mgr.name + ":" + querySQL
+			GetLocalCacheInstance().CacheDelete(stmtCacheRepository, cacheKey)
+		}
 	} else {
-		rows, err = executor.Query(querySQL, args...)
+		// 事务或其他 executor，使用原有逻辑
+		if execCtx, ok := executor.(sqlExecutorContext); ok {
+			rows, err = execCtx.QueryContext(ctx, querySQL, args...)
+		} else {
+			rows, err = executor.Query(querySQL, args...)
+		}
 	}
+
 	mgr.logTrace(start, querySQL, args, err)
 
 	if err != nil {
@@ -370,11 +457,34 @@ func (mgr *dbManager) queryMapWithContext(ctx context.Context, executor sqlExecu
 	var rows *sql.Rows
 	var err error
 
-	if execCtx, ok := executor.(sqlExecutorContext); ok {
-		rows, err = execCtx.QueryContext(ctx, querySQL, args...)
+	// 只有当 executor 是 *sql.DB 时才使用预编译语句缓存
+	if db, ok := executor.(*sql.DB); ok && db == mgr.db {
+		// 使用缓存的预编译语句
+		stmt, fromCache, stmtErr := mgr.getOrPrepareStmt(querySQL)
+		if stmtErr != nil {
+			mgr.logTrace(start, querySQL, args, stmtErr)
+			return nil, stmtErr
+		}
+
+		// 执行查询（使用 context）
+		rows, err = stmt.QueryContext(ctx, args...)
+
+		// 如果执行失败且可能是语句失效，从缓存移除
+		if err != nil && !fromCache {
+			// 新创建的语句出错，不需要特殊处理
+		} else if err != nil && isStmtInvalidError(err) {
+			cacheKey := mgr.name + ":" + querySQL
+			GetLocalCacheInstance().CacheDelete(stmtCacheRepository, cacheKey)
+		}
 	} else {
-		rows, err = executor.Query(querySQL, args...)
+		// 事务或其他 executor，使用原有逻辑
+		if execCtx, ok := executor.(sqlExecutorContext); ok {
+			rows, err = execCtx.QueryContext(ctx, querySQL, args...)
+		} else {
+			rows, err = executor.Query(querySQL, args...)
+		}
 	}
+
 	mgr.logTrace(start, querySQL, args, err)
 
 	if err != nil {
@@ -434,11 +544,34 @@ func (mgr *dbManager) execWithContext(ctx context.Context, executor sqlExecutor,
 	var result sql.Result
 	var err error
 
-	if execCtx, ok := executor.(sqlExecutorContext); ok {
-		result, err = execCtx.ExecContext(ctx, querySQL, args...)
+	// 只有当 executor 是 *sql.DB 时才使用预编译语句缓存
+	if db, ok := executor.(*sql.DB); ok && db == mgr.db {
+		// 使用缓存的预编译语句
+		stmt, fromCache, stmtErr := mgr.getOrPrepareStmt(querySQL)
+		if stmtErr != nil {
+			mgr.logTrace(start, querySQL, args, stmtErr)
+			return nil, stmtErr
+		}
+
+		// 执行命令（使用 context）
+		result, err = stmt.ExecContext(ctx, args...)
+
+		// 如果执行失败且可能是语句失效，从缓存移除
+		if err != nil && !fromCache {
+			// 新创建的语句出错，不需要特殊处理
+		} else if err != nil && isStmtInvalidError(err) {
+			cacheKey := mgr.name + ":" + querySQL
+			GetLocalCacheInstance().CacheDelete(stmtCacheRepository, cacheKey)
+		}
 	} else {
-		result, err = executor.Exec(querySQL, args...)
+		// 事务或其他 executor，使用原有逻辑
+		if execCtx, ok := executor.(sqlExecutorContext); ok {
+			result, err = execCtx.ExecContext(ctx, querySQL, args...)
+		} else {
+			result, err = executor.Exec(querySQL, args...)
+		}
 	}
+
 	mgr.logTrace(start, querySQL, args, err)
 
 	if err != nil {
@@ -2264,6 +2397,10 @@ func Close() error {
 	defer multiMgr.mu.Unlock()
 
 	for _, dbMgr := range multiMgr.databases {
+		// 清理预编译语句缓存
+		dbMgr.clearStmtCache()
+
+		// 关闭数据库连接
 		if dbMgr.db != nil {
 			dbMgr.db.Close()
 		}
@@ -2282,6 +2419,10 @@ func CloseDB(dbname string) error {
 		defer multiMgr.mu.Unlock()
 
 		if dbMgr, exists := multiMgr.databases[dbname]; exists {
+			// 清理预编译语句缓存
+			dbMgr.clearStmtCache()
+
+			// 关闭数据库连接
 			if dbMgr.db != nil {
 				dbMgr.db.Close()
 				dbMgr.db = nil
