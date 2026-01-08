@@ -8,6 +8,76 @@ import (
 	"time"
 )
 
+// 结构体反射缓存的存储库名称（内部使用，不对外暴露）
+const structCacheRepository = "__dbkit_struct_cache__"
+
+// structFieldInfo 存储单个字段的缓存信息
+type structFieldInfo struct {
+	fieldIndex int          // 字段索引
+	columnName string       // 列名（从 tag 解析）
+	fieldType  reflect.Type // 字段类型
+	fieldKind  reflect.Kind // 字段种类
+	canSet     bool         // 是否可设置（可导出）
+}
+
+// structCacheInfo 存储整个结构体的缓存信息
+type structCacheInfo struct {
+	fields []structFieldInfo // 字段信息列表
+}
+
+// getStructCacheInfo 获取或创建结构体的缓存信息
+// 使用 localCache 缓存结构体的反射信息，避免重复解析
+func getStructCacheInfo(structType reflect.Type) *structCacheInfo {
+	// 使用 Type 的字符串表示作为缓存键
+	// 这样可以自动处理多数据库同名表的问题（不同包的同名结构体有不同的 Type）
+	cacheKey := structType.String()
+
+	// 尝试从本地缓存获取
+	if cached, ok := LocalCacheGet(structCacheRepository, cacheKey); ok {
+		return cached.(*structCacheInfo)
+	}
+
+	// 缓存未命中，解析结构体字段信息
+	info := &structCacheInfo{
+		fields: make([]structFieldInfo, 0, structType.NumField()),
+	}
+
+	for i := 0; i < structType.NumField(); i++ {
+		field := structType.Field(i)
+
+		// 解析列名（只解析一次，后续从缓存读取）
+		colName := field.Tag.Get("column")
+		if colName == "" {
+			colName = field.Tag.Get("db")
+		}
+		if colName == "" {
+			colName = field.Tag.Get("json")
+		}
+		if colName == "" || colName == "-" {
+			colName = strings.ToLower(field.Name)
+		}
+
+		// 处理逗号分隔的 tag（如 json:"id,omitempty"）
+		if idx := strings.Index(colName, ","); idx != -1 {
+			colName = colName[:idx]
+		}
+
+		// 存储字段信息
+		info.fields = append(info.fields, structFieldInfo{
+			fieldIndex: i,
+			columnName: colName,
+			fieldType:  field.Type,
+			fieldKind:  field.Type.Kind(),
+			canSet:     field.IsExported(), // Go 1.17+ 使用 IsExported 判断是否可导出
+		})
+	}
+
+	// 存入本地缓存（永不过期，因为结构体定义在运行时不会改变）
+	LocalCacheSet(structCacheRepository, cacheKey, info, 0)
+
+	return info
+}
+
 // ToStruct converts a single Record to a struct.
 // dest must be a pointer to a struct.
 func ToStruct(r *Record, dest interface{}) error {
@@ -56,38 +126,28 @@ func ToRecord(src interface{}) *Record {
 
 func setStructFromRecord(structVal reflect.Value, r *Record) error {
 	structType := structVal.Type()
-	for i := 0; i < structVal.NumField(); i++ {
-		field := structType.Field(i)
-		fieldVal := structVal.Field(i)
 
-		if !fieldVal.CanSet() {
+	// 获取缓存的结构体信息（首次调用会解析并缓存，后续直接使用缓存）
+	cacheInfo := getStructCacheInfo(structType)
+
+	// 使用缓存的字段信息，避免重复反射解析
+	for _, fieldInfo := range cacheInfo.fields {
+		fieldVal := structVal.Field(fieldInfo.fieldIndex)
+
+		// 使用缓存的 canSet 信息
+		if !fieldInfo.canSet {
 			continue
 		}
 
-		// Get column name from tags
-		colName := field.Tag.Get("column")
-		if colName == "" {
-			colName = field.Tag.Get("db")
-		}
-		if colName == "" {
-			colName = field.Tag.Get("json")
-		}
-		if colName == "" || colName == "-" {
-			colName = strings.ToLower(field.Name)
-		}
-
-		// Handle comma in tags (like json:"id,omitempty")
-		if idx := strings.Index(colName, ","); idx != -1 {
-			colName = colName[:idx]
-		}
-
-		val := r.Get(colName)
+		val := r.Get(fieldInfo.columnName)
 		if val == nil {
 			continue
 		}
 
 		if err := setFieldValue(fieldVal, val); err != nil {
-			return fmt.Errorf("field %s: %v", field.Name, err)
+			// 获取字段名用于错误信息
+			fieldName := structType.Field(fieldInfo.fieldIndex).Name
+			return fmt.Errorf("field %s: %v", fieldName, err)
 		}
 	}
 	return nil
@@ -95,30 +155,19 @@ func setStructFromRecord(structVal reflect.Value, r *Record) error {
 
 func setRecordFromStruct(r *Record, structVal reflect.Value) error {
 	structType := structVal.Type()
-	for i := 0; i < structVal.NumField(); i++ {
-		field := structType.Field(i)
-		fieldVal := structVal.Field(i)
+
+	// 获取缓存的结构体信息（首次调用会解析并缓存，后续直接使用缓存）
+	cacheInfo := getStructCacheInfo(structType)
+
+	// 使用缓存的字段信息，避免重复反射解析
+	for _, fieldInfo := range cacheInfo.fields {
+		fieldVal := structVal.Field(fieldInfo.fieldIndex)
+
 		if !fieldVal.CanInterface() {
 			continue
 		}
 
-		// Get column name from tags
-		colName := field.Tag.Get("column")
-		if colName == "" {
-			colName = field.Tag.Get("db")
-		}
-		if colName == "" {
-			colName = field.Tag.Get("json")
-		}
-		if colName == "" || colName == "-" {
-			colName = strings.ToLower(field.Name)
-		}
-
-		if idx := strings.Index(colName, ","); idx != -1 {
-			colName = colName[:idx]
-		}
-
-		r.Set(colName, fieldVal.Interface())
+		r.Set(fieldInfo.columnName, fieldVal.Interface())
 	}
 	return nil
 }
