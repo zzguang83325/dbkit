@@ -1,0 +1,7 @@
+{
+  "namespace": "user_service",
+  "sqls": {
+    "getProfile": "SELECT u.*, (SELECT COUNT(*) FROM pro_articles WHERE author_id = u.id) as article_count FROM pro_users u WHERE u.id = ?",
+    "getTopAuthors": "SELECT u.username, COUNT(a.id) as count FROM pro_users u JOIN pro_articles a ON u.id = a.author_id GROUP BY u.id HAVING count > ? ORDER BY count DESC"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "namespace": "article_service",
+  "sqls": {
+    "findWithDetails": "SELECT a.*, u.username as author_name FROM pro_articles a LEFT JOIN pro_users u ON a.author_id = u.id WHERE a.status = ? AND a.deleted_at IS NULL",
+    "getPopularArticles": "SELECT a.title, COUNT(c.id) as comment_count FROM pro_articles a LEFT JOIN pro_comments c ON a.id = c.article_id GROUP BY a.id HAVING comment_count >= ? ORDER BY comment_count DESC"
+  }
+}
