@@ -786,6 +786,84 @@ dbkit.Restore("users", "id = ?", 1)
 dbkit.Table("users").Where("id = ?", 1).Restore()
 ```
 
+### QueryWithOutTrashed
+```go
+func QueryWithOutTrashed(querySQL string, args ...interface{}) ([]Record, error)
+func (db *DB) QueryWithOutTrashed(querySQL string, args ...interface{}) ([]Record, error)
+func (tx *Tx) QueryWithOutTrashed(querySQL string, args ...interface{}) ([]Record, error)
+```
+执行原生 SQL 查询并自动过滤软删除数据。自动检测 SQL 中涉及的表，为配置了软删除的表添加过滤条件。
+
+**参数:**
+- `querySQL`: 原生 SQL 查询语句
+- `args`: SQL 参数
+
+**返回:**
+- `[]Record`: 查询结果记录列表
+- `error`: 错误信息
+
+**示例:**
+```go
+// 单表查询自动过滤软删除
+users, err := dbkit.QueryWithOutTrashed("SELECT * FROM users WHERE age > ?", 18)
+// 原始 SQL: SELECT * FROM users WHERE age > ?
+// 自动转换: SELECT * FROM users WHERE age > ? AND deleted_at IS NULL
+
+// 多表 JOIN 查询
+posts, err := dbkit.QueryWithOutTrashed(`
+    SELECT p.*, u.name as author_name 
+    FROM posts p 
+    JOIN users u ON p.user_id = u.id 
+    WHERE p.status = ?
+`, "published")
+
+// 多数据库模式
+users, err := dbkit.Use("main").QueryWithOutTrashed("SELECT * FROM users")
+
+// 事务中使用
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    users, err := tx.QueryWithOutTrashed("SELECT * FROM users WHERE active = ?", true)
+    return err
+})
+```
+
+### QueryFirstWithOutTrashed
+```go
+func QueryFirstWithOutTrashed(querySQL string, args ...interface{}) (*Record, error)
+func (db *DB) QueryFirstWithOutTrashed(querySQL string, args ...interface{}) (*Record, error)
+func (tx *Tx) QueryFirstWithOutTrashed(querySQL string, args ...interface{}) (*Record, error)
+```
+执行原生 SQL 查询并返回第一条非软删除记录。基于 `QueryWithOutTrashed` 实现。
+
+**参数:**
+- `querySQL`: 原生 SQL 查询语句
+- `args`: SQL 参数
+
+**返回:**
+- `*Record`: 第一条记录（无记录时返回 nil）
+- `error`: 错误信息
+
+**示例:**
+```go
+// 查询第一条记录
+user, err := dbkit.QueryFirstWithOutTrashed("SELECT * FROM users WHERE email = ?", "test@example.com")
+if user != nil {
+    fmt.Printf("用户: %s\n", user.Str("name"))
+}
+
+// 多数据库模式
+user, err := dbkit.Use("main").QueryFirstWithOutTrashed("SELECT * FROM users ORDER BY id DESC")
+
+// 事务中使用
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    user, err := tx.QueryFirstWithOutTrashed("SELECT * FROM users WHERE id = ?", 1)
+    if user == nil {
+        return fmt.Errorf("用户不存在")
+    }
+    return nil
+})
+```
+
 ### 软删除完整示例
 ```go
 // 1. 配置软删除

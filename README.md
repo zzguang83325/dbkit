@@ -1275,6 +1275,42 @@ dbkit.Restore("users", "id = ?", 1)
 dbkit.ForceDelete("users", "id = ?", 1)
 ```
 
+#### 原生 SQL 软删除过滤
+DBKit 提供了 `QueryWithOutTrashed` 和 `QueryFirstWithOutTrashed` 函数，可以对任意原生 SQL 查询自动添加软删除过滤条件：
+
+```go
+// 原生 SQL 查询自动过滤软删除数据
+users, err := dbkit.QueryWithOutTrashed("SELECT * FROM users WHERE age > ?", 18)
+// 原始 SQL: SELECT * FROM users WHERE age > ?
+// 自动转换为: SELECT * FROM users WHERE age > ? AND deleted_at IS NULL
+
+// 查询第一条记录
+user, err := dbkit.QueryFirstWithOutTrashed("SELECT * FROM users WHERE email = ?", "test@example.com")
+
+// 多表 JOIN 查询自动处理
+posts, err := dbkit.QueryWithOutTrashed(`
+    SELECT p.*, u.name as author_name 
+    FROM posts p 
+    JOIN users u ON p.user_id = u.id 
+    WHERE p.status = ?
+`, "published")
+// 自动为配置了软删除的表添加过滤条件
+
+// 支持多数据库和事务
+posts, err := dbkit.Use("main").QueryWithOutTrashed("SELECT * FROM posts", )
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    users, err := tx.QueryWithOutTrashed("SELECT * FROM users")
+    return err
+})
+```
+
+**特性说明：**
+- 自动检测 SQL 中涉及的表，只为配置了软删除的表添加过滤条件
+- 智能避免重复添加：如果 SQL 中已包含软删除条件，不会重复添加
+- 支持各种 JOIN 类型：INNER JOIN、LEFT JOIN、RIGHT JOIN 等
+- 完全向后兼容：未启用软删除功能时行为与普通 Query 完全相同
+- 性能优化：使用正则表达式缓存，避免重复编译
+
 #### 链式调用
 ```go
 // 软删除

@@ -700,6 +700,42 @@ dbkit.Restore("users", "id = ?", 1)
 dbkit.ForceDelete("users", "id = ?", 1)
 ```
 
+#### Raw SQL Soft Delete Filtering
+DBKit provides `QueryWithOutTrashed` and `QueryFirstWithOutTrashed` functions that automatically add soft delete filtering conditions to any raw SQL queries:
+
+```go
+// Raw SQL query with automatic soft delete filtering
+users, err := dbkit.QueryWithOutTrashed("SELECT * FROM users WHERE age > ?", 18)
+// Original SQL: SELECT * FROM users WHERE age > ?
+// Auto-converted to: SELECT * FROM users WHERE age > ? AND deleted_at IS NULL
+
+// Query first record
+user, err := dbkit.QueryFirstWithOutTrashed("SELECT * FROM users WHERE email = ?", "test@example.com")
+
+// Multi-table JOIN queries with automatic handling
+posts, err := dbkit.QueryWithOutTrashed(`
+    SELECT p.*, u.name as author_name 
+    FROM posts p 
+    JOIN users u ON p.user_id = u.id 
+    WHERE p.status = ?
+`, "published")
+// Automatically adds filtering conditions for tables configured with soft delete
+
+// Support for multi-database and transactions
+posts, err := dbkit.Use("main").QueryWithOutTrashed("SELECT * FROM posts")
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    users, err := tx.QueryWithOutTrashed("SELECT * FROM users")
+    return err
+})
+```
+
+**Features:**
+- Automatically detects tables involved in SQL and only adds filtering conditions for tables configured with soft delete
+- Smart duplicate avoidance: Won't add duplicate conditions if SQL already contains soft delete conditions
+- Supports various JOIN types: INNER JOIN, LEFT JOIN, RIGHT JOIN, etc.
+- Fully backward compatible: Behaves exactly like regular Query when soft delete is not enabled
+- Performance optimized: Uses regex caching to avoid repeated compilation
+
 ### 8. Optimistic Lock
 
 Optimistic lock detects concurrent update conflicts through version fields, preventing data from being accidentally overwritten.

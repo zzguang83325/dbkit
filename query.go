@@ -54,6 +54,27 @@ func QueryMap(querySQL string, args ...interface{}) ([]map[string]interface{}, e
 	return db.QueryMap(querySQL, args...)
 }
 
+// QueryWithOutTrashed 执行原始 SQL 查询并自动过滤软删除数据（全局函数）
+// 实现快速路径检查（软删除功能禁用、表未配置）
+// 调用 dbManager 的分析方法，错误时回退到原始 Query 方法
+func QueryWithOutTrashed(querySQL string, args ...interface{}) ([]Record, error) {
+	db, err := defaultDB()
+	if err != nil {
+		return nil, err
+	}
+	return db.QueryWithOutTrashed(querySQL, args...)
+}
+
+// QueryFirstWithOutTrashed 执行原始 SQL 查询并返回第一条非软删除记录（全局函数）
+// 基于 QueryWithOutTrashed 实现，返回第一条记录，处理空结果情况
+func QueryFirstWithOutTrashed(querySQL string, args ...interface{}) (*Record, error) {
+	db, err := defaultDB()
+	if err != nil {
+		return nil, err
+	}
+	return db.QueryFirstWithOutTrashed(querySQL, args...)
+}
+
 func Exec(querySQL string, args ...interface{}) (sql.Result, error) {
 	db, err := defaultDB()
 	if err != nil {
@@ -487,6 +508,56 @@ func (db *DB) QueryMap(querySQL string, args ...interface{}) ([]map[string]inter
 		return results, err
 	}
 	return db.dbMgr.queryMapWithContext(ctx, sdb, querySQL, args...)
+}
+
+// QueryWithOutTrashed 执行原始 SQL 查询并自动过滤软删除数据
+// 支持缓存功能集成和超时设置传递
+func (db *DB) QueryWithOutTrashed(querySQL string, args ...interface{}) ([]Record, error) {
+	if db.lastErr != nil {
+		return nil, db.lastErr
+	}
+
+	// 1. 快速路径检查：软删除功能禁用时直接调用原始 Query 方法
+	if !db.dbMgr.enableSoftDeleteCheck {
+		return db.Query(querySQL, args...)
+	}
+
+	// 2. SQL分析：检查是否需要注入软删除条件
+	analysisResult, err := db.dbMgr.analyzeSQLForSoftDelete(querySQL)
+	if err != nil {
+		// 分析失败时回退到原始 Query 方法
+		return db.Query(querySQL, args...)
+	}
+
+	// 3. 判断是否需要处理：表未配置或已有条件时直接调用原始方法
+	if !analysisResult.needsInjection {
+		return db.Query(querySQL, args...)
+	}
+
+	// 4. 执行修改后的SQL
+	return db.Query(analysisResult.modifiedSQL, args...)
+}
+
+// QueryFirstWithOutTrashed 执行原始 SQL 查询并返回第一条非软删除记录
+// 基于 QueryWithOutTrashed 实现，支持缓存和超时功能
+func (db *DB) QueryFirstWithOutTrashed(querySQL string, args ...interface{}) (*Record, error) {
+	if db.lastErr != nil {
+		return nil, db.lastErr
+	}
+
+	// 基于 QueryWithOutTrashed 实现
+	records, err := db.QueryWithOutTrashed(querySQL, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	// 处理空结果情况
+	if len(records) == 0 {
+		return nil, nil
+	}
+
+	// 返回第一条记录
+	return &records[0], nil
 }
 
 func (db *DB) Exec(querySQL string, args ...interface{}) (sql.Result, error) {
@@ -1101,6 +1172,48 @@ func (tx *Tx) QueryMap(querySQL string, args ...interface{}) ([]map[string]inter
 		return results, err
 	}
 	return tx.dbMgr.queryMapWithContext(ctx, tx.tx, querySQL, args...)
+}
+
+// QueryWithOutTrashed 在事务上下文中执行原始 SQL 查询并自动过滤软删除数据
+// 支持缓存和超时功能，保持事务完整性
+func (tx *Tx) QueryWithOutTrashed(querySQL string, args ...interface{}) ([]Record, error) {
+	// 1. 快速路径检查：软删除功能禁用时直接调用原始 Query 方法
+	if !tx.dbMgr.enableSoftDeleteCheck {
+		return tx.Query(querySQL, args...)
+	}
+
+	// 2. SQL分析：检查是否需要注入软删除条件
+	analysisResult, err := tx.dbMgr.analyzeSQLForSoftDelete(querySQL)
+	if err != nil {
+		// 分析失败时回退到原始 Query 方法
+		return tx.Query(querySQL, args...)
+	}
+
+	// 3. 判断是否需要处理：表未配置或已有条件时直接调用原始方法
+	if !analysisResult.needsInjection {
+		return tx.Query(querySQL, args...)
+	}
+
+	// 4. 在事务上下文中执行修改后的SQL
+	return tx.Query(analysisResult.modifiedSQL, args...)
+}
+
+// QueryFirstWithOutTrashed 在事务上下文中执行原始 SQL 查询并返回第一条非软删除记录
+// 基于 Tx.QueryWithOutTrashed 实现，保持事务完整性
+func (tx *Tx) QueryFirstWithOutTrashed(querySQL string, args ...interface{}) (*Record, error) {
+	// 基于 QueryWithOutTrashed 实现
+	records, err := tx.QueryWithOutTrashed(querySQL, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	// 处理空结果情况
+	if len(records) == 0 {
+		return nil, nil
+	}
+
+	// 返回第一条记录
+	return &records[0], nil
 }
 
 func (tx *Tx) Exec(querySQL string, args ...interface{}) (sql.Result, error) {

@@ -765,6 +765,84 @@ dbkit.Restore("users", "id = ?", 1)
 dbkit.Table("users").Where("id = ?", 1).Restore()
 ```
 
+### QueryWithOutTrashed
+```go
+func QueryWithOutTrashed(querySQL string, args ...interface{}) ([]Record, error)
+func (db *DB) QueryWithOutTrashed(querySQL string, args ...interface{}) ([]Record, error)
+func (tx *Tx) QueryWithOutTrashed(querySQL string, args ...interface{}) ([]Record, error)
+```
+Execute raw SQL queries with automatic soft delete filtering. Automatically detects tables involved in SQL and adds filtering conditions for tables configured with soft delete.
+
+**Parameters:**
+- `querySQL`: Raw SQL query statement
+- `args`: SQL parameters
+
+**Returns:**
+- `[]Record`: List of query result records
+- `error`: Error information
+
+**Example:**
+```go
+// Single table query with automatic soft delete filtering
+users, err := dbkit.QueryWithOutTrashed("SELECT * FROM users WHERE age > ?", 18)
+// Original SQL: SELECT * FROM users WHERE age > ?
+// Auto-converted: SELECT * FROM users WHERE age > ? AND deleted_at IS NULL
+
+// Multi-table JOIN query
+posts, err := dbkit.QueryWithOutTrashed(`
+    SELECT p.*, u.name as author_name 
+    FROM posts p 
+    JOIN users u ON p.user_id = u.id 
+    WHERE p.status = ?
+`, "published")
+
+// Multi-database mode
+users, err := dbkit.Use("main").QueryWithOutTrashed("SELECT * FROM users")
+
+// Use in transactions
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    users, err := tx.QueryWithOutTrashed("SELECT * FROM users WHERE active = ?", true)
+    return err
+})
+```
+
+### QueryFirstWithOutTrashed
+```go
+func QueryFirstWithOutTrashed(querySQL string, args ...interface{}) (*Record, error)
+func (db *DB) QueryFirstWithOutTrashed(querySQL string, args ...interface{}) (*Record, error)
+func (tx *Tx) QueryFirstWithOutTrashed(querySQL string, args ...interface{}) (*Record, error)
+```
+Execute raw SQL query and return the first non-soft-deleted record. Based on `QueryWithOutTrashed` implementation.
+
+**Parameters:**
+- `querySQL`: Raw SQL query statement
+- `args`: SQL parameters
+
+**Returns:**
+- `*Record`: First record (returns nil if no records found)
+- `error`: Error information
+
+**Example:**
+```go
+// Query first record
+user, err := dbkit.QueryFirstWithOutTrashed("SELECT * FROM users WHERE email = ?", "test@example.com")
+if user != nil {
+    fmt.Printf("User: %s\n", user.Str("name"))
+}
+
+// Multi-database mode
+user, err := dbkit.Use("main").QueryFirstWithOutTrashed("SELECT * FROM users ORDER BY id DESC")
+
+// Use in transactions
+err := dbkit.Transaction(func(tx *dbkit.Tx) error {
+    user, err := tx.QueryFirstWithOutTrashed("SELECT * FROM users WHERE id = ?", 1)
+    if user == nil {
+        return fmt.Errorf("user not found")
+    }
+    return nil
+})
+```
+
 ### Complete Soft Delete Example
 ```go
 // 1. Configure soft delete
