@@ -20,6 +20,7 @@ DBKit 是一个基于 Go 语言的高性能、轻量级数据库ORM，灵感来�
 - **缓存支持**: 支持内存缓存及 Redis 缓存，提供链式查询缓存,无需复杂操作,将SQL结果直接缓存
 - **连接池管理**: 内置连接池管理，提高性能
 - **连接池监控**: 提供连接池状态统计
+- **连接监控**: 自动监控数据库连接状态，连接断开时自动重连，确保应用稳定性
 - **查询超时控制**: 支持全局和单次查询超时设置，防止慢查询阻塞
 - **自动时间戳**: 支持配置自动时间戳字段，插入和更新时自动填充 created_at 和 updated_at
 - **软删除支持**: 支持配置软删除字段，自动过滤已删除记录，提供恢复和物理删除功能
@@ -319,6 +320,9 @@ config := &dbkit.Config{
     MaxOpen:         50,
     MaxIdle:         25,
     ConnMaxLifetime: time.Hour,
+    // 连接监控配置（可选，有默认值）
+    MonitorNormalInterval: 60 * time.Second, // 正常检查间隔，默认60秒
+    MonitorErrorInterval:  10 * time.Second, // 故障检查间隔，默认10秒
 }
 dbkit.OpenDatabaseWithConfig(config)
 ```
@@ -997,12 +1001,46 @@ config := &dbkit.Config{
     MaxIdle:         25,    // 最大空闲连接数
     ConnMaxLifetime: time.Hour, // 连接最大生命周期
     QueryTimeout:    30 * time.Second, // 默认查询超时时间
+    
+    // 连接监控配置
+    MonitorNormalInterval: 60 * time.Second, // 正常检查间隔（默认60秒）
+    MonitorErrorInterval:  10 * time.Second, // 故障检查间隔（默认10秒）
 }
 
 dbkit.OpenDatabaseWithConfig(config)
 ```
 
-### 8. 查询超时控制
+### 8. 数据库连接监控
+
+DBKit 提供自动的数据库连接监控功能，默认启用，无需额外配置：
+
+```go
+// 默认配置，监控自动启用（60秒正常检查，10秒故障重试）
+err := dbkit.OpenDatabase(dbkit.MySQL, "user:pass@tcp(localhost:3306)/db", 10)
+
+// 自定义监控间隔
+config := &dbkit.Config{
+    Driver:                dbkit.MySQL,
+    DSN:                   "user:pass@tcp(localhost:3306)/db",
+    MaxOpen:               10,
+    MonitorNormalInterval: 30 * time.Second, // 30秒正常检查
+    MonitorErrorInterval:  5 * time.Second,  // 5秒故障重试
+}
+dbkit.OpenDatabaseWithConfig(config)
+
+// 禁用监控（设置为0）
+config.MonitorNormalInterval = 0
+```
+
+**监控特点：**
+- 自动启用，无需配置
+- 智能频率调整：正常60秒，故障10秒
+- 多数据库独立监控
+- 全局锁避免并发检查
+- 只在状态变化时记录日志
+- 性能影响极小（每次检查约7纳秒）
+
+### 9. 查询超时控制
 
 DBKit 支持全局和单次查询超时设置，使用 Go 标准库的 `context.Context` 实现，超时后自动取消查询。
 
@@ -1053,7 +1091,7 @@ if err != nil {
 }
 ```
 
-### 9. 连接池监控
+### 10. 连接池监控
 
 DBKit 提供连接池状态监控功能，可以实时查看连接池的使用情况。
 
@@ -1127,7 +1165,7 @@ dbkit_pool_in_use{db="default",driver="mysql"} 2
 dbkit_pool_idle{db="default",driver="mysql"} 3
 ```
 
-### 10. 自动时间戳 (Auto Timestamps)
+### 11. 自动时间戳 (Auto Timestamps)
 
 自动时间戳功能允许在插入和更新记录时自动填充时间戳字段，无需手动设置。
 
@@ -1193,7 +1231,7 @@ users, _ := dbkit.Table("users").
     Find()
 ```
 
-### 11. 软删除 (Soft Delete)
+### 12. 软删除 (Soft Delete)
 
 软删除允许删除记录时只标记为已删除而非物理删除，便于数据恢复和审计。
 
@@ -1267,7 +1305,7 @@ users, _ := user.FindWithTrashed("status = ?", "id DESC", "active")
 deletedUsers, _ := user.FindOnlyTrashed("", "id DESC")
 ```
 
-### 12. 乐观锁 (Optimistic Lock)
+### 13. 乐观锁 (Optimistic Lock)
 
 乐观锁通过版本号字段检测并发更新冲突，防止数据被意外覆盖。
 
@@ -1329,7 +1367,7 @@ dbkit.Transaction(func(tx *dbkit.Tx) error {
 })
 ```
 
-### 13. SQL 模板 (SQL Templates)
+### 14. SQL 模板 (SQL Templates)
 
 DBKit 提供了强大的 SQL 模板功能，允许您将 SQL 语句配置化管理，支持动态参数、条件构建和多数据库执行。
 

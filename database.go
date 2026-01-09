@@ -56,6 +56,10 @@ type Config struct {
 	MaxIdle         int           // Maximum number of idle connections
 	ConnMaxLifetime time.Duration // Maximum connection lifetime
 	QueryTimeout    time.Duration // Default query timeout (0 means no timeout)
+
+	// 连接监控配置（新增）
+	MonitorNormalInterval time.Duration // 正常检查间隔（默认60秒，0表示禁用监控）
+	MonitorErrorInterval  time.Duration // 故障检查间隔（默认10秒）
 }
 
 // SupportedDrivers returns a list of all supported database drivers
@@ -171,6 +175,11 @@ type dbManager struct {
 	enableTimestampCheck      bool // Enable auto timestamp check in Update (default: false)
 	enableOptimisticLockCheck bool // Enable optimistic lock check in Update (default: false)
 	enableSoftDeleteCheck     bool // Enable soft delete check in queries (default: false)
+
+	// 连接监控相关（默认启用）
+	monitor      *ConnectionMonitor // 连接监控器实例
+	lastPingTime time.Time          // 最后一次 Ping 时间
+	pingMu       sync.RWMutex       // Ping 操作锁
 }
 
 // MultiDBManager manages multiple database connections
@@ -195,11 +204,13 @@ func init() {
 // createDefaultConfig creates a Config with default settings
 func createDefaultConfig(driver DriverType, dsn string, maxOpen int) *Config {
 	return &Config{
-		Driver:          driver,
-		DSN:             dsn,
-		MaxOpen:         maxOpen,
-		MaxIdle:         maxOpen / 2,
-		ConnMaxLifetime: time.Hour,
+		Driver:                driver,
+		DSN:                   dsn,
+		MaxOpen:               maxOpen,
+		MaxIdle:               maxOpen / 2,
+		ConnMaxLifetime:       time.Hour,
+		MonitorNormalInterval: 60 * time.Second, // 默认60秒正常检查间隔
+		MonitorErrorInterval:  10 * time.Second, // 默认10秒故障检查间隔
 	}
 }
 
@@ -2452,6 +2463,9 @@ func Close() error {
 	defer multiMgr.mu.Unlock()
 
 	for _, dbMgr := range multiMgr.databases {
+		// 停止连接监控
+		cleanupMonitor(dbMgr.name)
+
 		// 清理预编译语句缓存
 		dbMgr.clearStmtCache()
 
@@ -2474,6 +2488,9 @@ func CloseDB(dbname string) error {
 		defer multiMgr.mu.Unlock()
 
 		if dbMgr, exists := multiMgr.databases[dbname]; exists {
+			// 停止连接监控
+			cleanupMonitor(dbname)
+
 			// 清理预编译语句缓存
 			dbMgr.clearStmtCache()
 
@@ -2658,6 +2675,18 @@ func (mgr *dbManager) initDB() error {
 	}
 
 	mgr.db = db
+
+	// 根据配置启用连接监控
+	if mgr.config.MonitorNormalInterval > 0 {
+		if err := mgr.startConnectionMonitoring(); err != nil {
+			// 监控启动失败不影响数据库连接，只记录警告日志
+			LogWarn("连接监控启动失败", map[string]interface{}{
+				"database": mgr.name,
+				"error":    err.Error(),
+			})
+		}
+	}
+
 	return nil
 }
 
@@ -3031,4 +3060,24 @@ func AllPrometheusMetrics() string {
 	}
 
 	return result.String()
+}
+
+// startConnectionMonitoring 启动连接监控
+func (mgr *dbManager) startConnectionMonitoring() error {
+	monitor := &ConnectionMonitor{
+		pinger:         mgr, // dbManager 实现了 DBPinger 接口
+		dbName:         mgr.name,
+		normalInterval: mgr.config.MonitorNormalInterval,
+		errorInterval:  mgr.config.MonitorErrorInterval,
+		stopCh:         make(chan struct{}),
+		lastHealthy:    true, // 假设初始状态为健康
+	}
+
+	monitorsMu.Lock()
+	monitors[mgr.name] = monitor
+	monitorsMu.Unlock()
+
+	// 启动监控 goroutine
+	go monitor.run()
+	return nil
 }

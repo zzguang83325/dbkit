@@ -85,10 +85,10 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("package %s\n\n", pkgName))
 
-	// Check if time import is needed
+	// 检查是否需要 time 导入
 	hasTime := false
 	for _, col := range columns {
-		if strings.Contains(dbTypeToGoType(col.Type, col.Nullable), "time.Time") {
+		if strings.Contains(dbTypeToGoType(col.Type, col.Nullable, col.IsPK), "time.Time") {
 			hasTime = true
 			break
 		}
@@ -108,12 +108,12 @@ func (db *DB) GenerateDbModel(tablename, outPath, structName string) error {
 
 	sb.WriteString(fmt.Sprintf("// %s represents the %s table\n", finalStructName, tablename))
 	sb.WriteString(fmt.Sprintf("type %s struct {\n", finalStructName))
-	// Embed ModelCache to support caching functionality
-	sb.WriteString("\tdbkit.ModelCache\n")
+	// 嵌入 ModelCache 以支持缓存功能，添加 column:"-" 标签防止映射到数据库列
+	sb.WriteString("\tdbkit.ModelCache `column:\"-\"`\n")
 
 	for _, col := range columns {
 		fieldName := SnakeToCamel(col.Name)
-		goType := dbTypeToGoType(col.Type, col.Nullable)
+		goType := dbTypeToGoType(col.Type, col.Nullable, col.IsPK)
 
 		// 跳过空字段名
 		if fieldName == "" {
@@ -391,25 +391,51 @@ func SnakeToCamel(s string) string {
 	return strings.Join(parts, "")
 }
 
-func dbTypeToGoType(dbType string, nullable bool) string {
+// dbTypeToGoType 将数据库类型转换为 Go 类型，支持可空字段
+func dbTypeToGoType(dbType string, nullable bool, isPK bool) string {
 	dbType = strings.ToLower(dbType)
 	var goType string
 
 	switch {
 	case strings.Contains(dbType, "int") || strings.Contains(dbType, "integer") || strings.Contains(dbType, "bigint") || strings.Contains(dbType, "smallint") || strings.Contains(dbType, "tinyint"):
-		goType = "int64"
+		if nullable && !isPK {
+			goType = "*int64"
+		} else {
+			goType = "int64"
+		}
 	case strings.Contains(dbType, "char") || strings.Contains(dbType, "text") || strings.Contains(dbType, "string") || strings.Contains(dbType, "varchar"):
-		goType = "string"
+		if nullable && !isPK {
+			goType = "*string"
+		} else {
+			goType = "string"
+		}
 	case strings.Contains(dbType, "float") || strings.Contains(dbType, "double") || strings.Contains(dbType, "decimal") || strings.Contains(dbType, "numeric") || strings.Contains(dbType, "number") || strings.Contains(dbType, "real"):
-		goType = "float64"
+		if nullable && !isPK {
+			goType = "*float64"
+		} else {
+			goType = "float64"
+		}
 	case strings.Contains(dbType, "date") || strings.Contains(dbType, "time") || strings.Contains(dbType, "timestamp"):
-		goType = "time.Time"
+		// 时间类型：如果可空且不是主键，使用指针类型以支持 NULL 值和避免 MySQL 零值问题
+		if nullable && !isPK {
+			goType = "*time.Time"
+		} else {
+			goType = "time.Time"
+		}
 	case strings.Contains(dbType, "bool") || strings.Contains(dbType, "boolean"):
-		goType = "bool"
+		if nullable && !isPK {
+			goType = "*bool"
+		} else {
+			goType = "bool"
+		}
 	case strings.Contains(dbType, "json") || strings.Contains(dbType, "jsonb"):
-		goType = "string"
+		if nullable && !isPK {
+			goType = "*string"
+		} else {
+			goType = "string"
+		}
 	case strings.Contains(dbType, "blob") || strings.Contains(dbType, "binary"):
-		goType = "[]byte"
+		goType = "[]byte" // 二进制数据通常不使用指针
 	default:
 		goType = "interface{}"
 	}

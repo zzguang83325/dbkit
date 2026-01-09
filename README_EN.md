@@ -20,6 +20,7 @@ DBKit is a high-performance, lightweight database ORM library for Go, inspired  
 - **Cache Support**: Built-in two-level cache supporting local memory and Redis cache with chain query caching
 - **Connection Pool Management**: Built-in connection pool management for improved performance
 - **Connection Pool Monitoring**: Connection pool statistics with Prometheus metrics export
+- **Connection Monitoring**: Automatic database connection monitoring with auto-reconnect on failure, ensuring application stability
 - **Query Timeout Control**: Global and per-query timeout settings to prevent slow queries from blocking
 - **Auto Timestamps**: Configurable auto timestamp fields, automatically populate created_at and updated_at on insert and update
 - **Soft Delete Support**: Configurable soft delete fields, automatic filtering of deleted records, restore and force delete functions
@@ -271,6 +272,9 @@ config := &dbkit.Config{
     MaxOpen:         50,
     MaxIdle:         25,
     ConnMaxLifetime: time.Hour,
+    // Connection monitoring configuration (optional, has default values)
+    MonitorNormalInterval: 60 * time.Second, // Normal check interval, default 60s
+    MonitorErrorInterval:  10 * time.Second, // Error check interval, default 10s
 }
 dbkit.OpenDatabaseWithConfig(config)
 ```
@@ -1175,7 +1179,37 @@ users, err := dbkit.SqlTemplate("searchUsers", params).Query()
 4. **Parameter validation** - System automatically validates parameter count and type
 5. **Error handling** - Catch and handle `SqlConfigError` type errors
 
-### 13. Connection Pool Configuration
+### 12. Database Connection Monitoring
+
+DBKit provides automatic database connection monitoring functionality, enabled by default with no additional configuration required:
+
+```go
+// Default configuration, monitoring automatically enabled (60s normal check, 10s error retry)
+err := dbkit.OpenDatabase(dbkit.MySQL, "user:pass@tcp(localhost:3306)/db", 10)
+
+// Custom monitoring intervals
+config := &dbkit.Config{
+    Driver:                dbkit.MySQL,
+    DSN:                   "user:pass@tcp(localhost:3306)/db",
+    MaxOpen:               10,
+    MonitorNormalInterval: 30 * time.Second, // 30s normal check
+    MonitorErrorInterval:  5 * time.Second,  // 5s error retry
+}
+dbkit.OpenDatabaseWithConfig(config)
+
+// Disable monitoring (set to 0)
+config.MonitorNormalInterval = 0
+```
+
+**Monitoring Features:**
+- Auto-enabled, no configuration needed
+- Smart frequency adjustment: 60s normal, 10s on error
+- Independent monitoring per database
+- Global lock prevents concurrent checks
+- Only logs on status changes
+- Minimal performance impact (~7ns per check)
+
+### 14. Connection Pool Configuration
 
 ```go
 config := &dbkit.Config{
@@ -1184,6 +1218,11 @@ config := &dbkit.Config{
     MaxOpen:         50,    // Maximum open connections
     MaxIdle:         25,    // Maximum idle connections
     ConnMaxLifetime: time.Hour, // Maximum connection lifetime
+    QueryTimeout:    30 * time.Second, // Default query timeout
+    
+    // Connection monitoring configuration
+    MonitorNormalInterval: 60 * time.Second, // Normal check interval (default 60s)
+    MonitorErrorInterval:  10 * time.Second, // Error check interval (default 10s)
 }
 dbkit.OpenDatabaseWithConfig(config)
 ```

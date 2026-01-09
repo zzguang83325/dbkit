@@ -53,13 +53,20 @@ func getStructCacheInfo(structType reflect.Type) *structCacheInfo {
 		if colName == "" {
 			colName = field.Tag.Get("json")
 		}
-		if colName == "" || colName == "-" {
+		if colName == "-" {
+			continue
+		}
+		if colName == "" {
 			colName = strings.ToLower(field.Name)
 		}
 
 		// 处理逗号分隔的 tag（如 json:"id,omitempty"）
 		if idx := strings.Index(colName, ","); idx != -1 {
 			colName = colName[:idx]
+		}
+
+		if colName == "-" {
+			continue
 		}
 
 		// 存储字段信息

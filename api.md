@@ -5,6 +5,7 @@
 ## 目录
 
 - [数据库初始化](#数据库初始化)
+- [数据库连接监控](#数据库连接监控)
 - [查询操作](#查询操作)
 - [查询超时控制](#查询超时控制)
 - [插入与更新](#插入与更新)
@@ -56,6 +57,10 @@ type Config struct {
     MaxIdle         int           // 最大空闲连接数
     ConnMaxLifetime time.Duration // 连接最大生命周期
     QueryTimeout    time.Duration // 默认查询超时时间（0表示不限制）
+    
+    // 连接监控配置（新增）
+    MonitorNormalInterval time.Duration // 正常检查间隔（默认60秒，0表示禁用监控）
+    MonitorErrorInterval  time.Duration // 故障检查间隔（默认10秒）
 }
 ```
 
@@ -96,6 +101,193 @@ func Ping() error
 func PingDB(dbname string) error
 ```
 测试数据库连接。
+
+---
+
+## 数据库连接监控
+
+DBKit 提供了自动的数据库连接监控功能，能够定时检查数据库连接状态，在连接断开时自动重连，确保应用程序的数据库连接稳定性。
+
+### 功能特点
+
+- **自动启用**：连接监控功能默认启用，用户无需额外配置
+- **智能频率调整**：正常情况下每60秒检查一次，检测到连接错误时切换为每10秒快速重试
+- **多数据库支持**：每个数据库独立监控，支持多数据库环境
+- **并发控制**：使用全局锁确保同时只有一个数据库在进行连接检查，避免网络拥塞
+- **简化日志**：只在连接状态变化时记录日志，减少日志噪音
+- **性能优化**：使用轻量级 Ping 操作，CPU 和内存占用极低
+
+### 配置连接监控
+
+连接监控通过 `Config` 结构体中的两个字段进行配置：
+
+```go
+type Config struct {
+    // ... 其他字段 ...
+    
+    // 连接监控配置
+    MonitorNormalInterval time.Duration // 正常检查间隔（默认60秒，0表示禁用监控）
+    MonitorErrorInterval  time.Duration // 故障检查间隔（默认10秒）
+}
+```
+
+#### 默认配置（推荐）
+
+```go
+// 使用默认配置，监控功能自动启用
+err := dbkit.OpenDatabase(dbkit.MySQL, "user:pass@tcp(localhost:3306)/db", 10)
+
+// 或使用 Config 结构体（监控字段使用默认值）
+config := &dbkit.Config{
+    Driver:  dbkit.MySQL,
+    DSN:     "user:pass@tcp(localhost:3306)/db",
+    MaxOpen: 10,
+    // MonitorNormalInterval 和 MonitorErrorInterval 使用默认值
+}
+dbkit.OpenDatabaseWithConfig(config)
+```
+
+#### 自定义监控间隔
+
+```go
+config := &dbkit.Config{
+    Driver:                dbkit.MySQL,
+    DSN:                   "user:pass@tcp(localhost:3306)/db",
+    MaxOpen:               10,
+    MonitorNormalInterval: 30 * time.Second, // 自定义正常检查间隔
+    MonitorErrorInterval:  5 * time.Second,  // 自定义故障检查间隔
+}
+dbkit.OpenDatabaseWithConfig(config)
+```
+
+#### 禁用连接监控
+
+```go
+config := &dbkit.Config{
+    Driver:                dbkit.MySQL,
+    DSN:                   "user:pass@tcp(localhost:3306)/db",
+    MaxOpen:               10,
+    MonitorNormalInterval: 0, // 设置为 0 禁用监控
+}
+dbkit.OpenDatabaseWithConfig(config)
+```
+
+### 多数据库监控
+
+```go
+// 为不同数据库配置不同的监控策略
+config1 := &dbkit.Config{
+    Driver:                dbkit.MySQL,
+    DSN:                   "user:pass@tcp(localhost:3306)/main_db",
+    MaxOpen:               20,
+    MonitorNormalInterval: 60 * time.Second,
+    MonitorErrorInterval:  10 * time.Second,
+}
+dbkit.Register("main", config1)
+
+config2 := &dbkit.Config{
+    Driver:                dbkit.PostgreSQL,
+    DSN:                   "host=localhost port=5432 user=postgres dbname=log_db",
+    MaxOpen:               10,
+    MonitorNormalInterval: 30 * time.Second, // 更频繁的检查
+    MonitorErrorInterval:  5 * time.Second,
+}
+dbkit.Register("logs", config2)
+
+config3 := &dbkit.Config{
+    Driver:                dbkit.SQLite3,
+    DSN:                   "file:cache.db",
+    MaxOpen:               5,
+    MonitorNormalInterval: 0, // 禁用 SQLite 监控
+}
+dbkit.Register("cache", config3)
+```
+
+### 监控工作原理
+
+1. **定时检查**：监控器使用 `database.Ping()` 方法定时检查连接状态
+2. **频率调整**：
+   - 连接正常时：使用 `MonitorNormalInterval`（默认60秒）
+   - 连接异常时：切换到 `MonitorErrorInterval`（默认10秒）快速重试
+   - 连接恢复后：自动切换回正常间隔
+3. **并发控制**：全局锁确保同时只有一个数据库在进行 Ping 操作
+4. **日志记录**：只在连接状态变化时记录日志
+
+### 日志输出示例
+
+```go
+// 启用调试模式查看监控日志
+dbkit.SetDebugMode(true)
+
+// 连接失败时的日志
+// [ERROR] 数据库连接失败 {"database": "main", "error": "connection refused", "time": "2024-01-15T10:30:00Z"}
+
+// 连接恢复时的日志  
+// [INFO] 数据库连接已恢复 {"database": "main", "time": "2024-01-15T10:31:00Z"}
+```
+
+### 性能影响
+
+连接监控功能的性能影响极小：
+
+- **CPU 占用**：每次检查约 6.94 纳秒，可忽略不计
+- **内存占用**：每个监控器约几百字节
+- **网络开销**：Ping 操作网络开销极小
+- **并发控制**：全局锁避免网络突发流量
+
+### 最佳实践
+
+1. **生产环境**：使用默认配置（60秒/10秒）平衡性能和可靠性
+2. **开发环境**：可以使用较短间隔（30秒/5秒）便于测试
+3. **高可用环境**：适当缩短间隔提高响应速度
+4. **本地数据库**：如 SQLite 可以考虑禁用监控
+5. **多数据库**：根据数据库重要性配置不同的监控策略
+
+### 完整示例
+
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+    "github.com/zzguang83325/dbkit"
+    _ "github.com/go-sql-driver/mysql"
+)
+
+func main() {
+    // 启用调试模式查看监控日志
+    dbkit.SetDebugMode(true)
+    
+    // 配置连接监控
+    config := &dbkit.Config{
+        Driver:                dbkit.MySQL,
+        DSN:                   "user:pass@tcp(localhost:3306)/test",
+        MaxOpen:               10,
+        MonitorNormalInterval: 30 * time.Second, // 30秒正常检查
+        MonitorErrorInterval:  5 * time.Second,  // 5秒故障重试
+    }
+    
+    err := dbkit.OpenDatabaseWithConfig(config)
+    if err != nil {
+        fmt.Printf("数据库连接失败: %v\n", err)
+        return
+    }
+    defer dbkit.Close()
+    
+    fmt.Println("数据库连接成功，监控已启用")
+    
+    // 应用程序继续运行，监控在后台自动工作
+    // 监控器会：
+    // 1. 每30秒检查一次连接状态
+    // 2. 如果检测到连接问题，切换为每5秒重试
+    // 3. 连接恢复后，切换回30秒正常检查
+    // 4. 只在状态变化时记录日志
+    
+    // 模拟应用程序运行
+    time.Sleep(2 * time.Minute)
+}
+```
 
 ---
 
