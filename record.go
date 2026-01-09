@@ -299,12 +299,6 @@ func (r *Record) MarshalJSON() ([]byte, error) {
 func (r *Record) UnmarshalJSON(data []byte) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.columns == nil {
-		r.columns = make(map[string]interface{})
-	}
-	if r.lowerKeyMap == nil {
-		r.lowerKeyMap = make(map[string]string)
-	}
 
 	// 清空现有数据
 	r.columns = make(map[string]interface{})

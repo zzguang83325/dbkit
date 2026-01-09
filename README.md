@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | [API 手册](api.md) | [API Reference](api_en.md) | [SQL 模板指南](doc/cn/SQL_TEMPLATE_GUIDE.md) | [SQL Template Guide](doc/en/SQL_TEMPLATE_GUIDE_EN.md) | [缓存使用指南](doc/cn/CACHE_ENHANCEMENT_GUIDE.md) | [Cache Usage Guide](doc/en/CACHE_ENHANCEMENT_GUIDE.md)
 
-DBKit 是一个基于 Go 语言的高性能、轻量级数据库ORM，灵感来自 Java 语言中的 JFinal 框架。它提供了极其简洁、直观的 API，通过 `Record` 和DbModel，让数据库操作变得像操作对象一样简单。 
+DBKit 是一个基于 Go 语言的高性能、轻量级数据库ORM，灵感来自 Java 语言中的 JFinal 框架。它提供了极其简洁、直观的 API，无需定义Struct，使用灵活的Record对象进行CRUD操作。 
 
 **项目链接**：https://github.com/zzguang83325/dbkit.git 
 
@@ -11,15 +11,15 @@ DBKit 是一个基于 Go 语言的高性能、轻量级数据库ORM，灵感来�
 - **数据库支持**: 支持 MySQL、PostgreSQL、SQLite、SQL Server、Oracle
 - **多数据库管理**：支持同时连接多个数据库，并能轻松在它们之间切换。 
 - **ActiveRecord 体验**：摆脱繁琐的 Struct 定义，使用灵活的 `Record` 对数据进行 CRUD。
-- **DbModel体验**:  通过自动生成的DbModel对象，轻松对数据CRUD。 
+- **DbModel体验**:  可通过自动生成的DbModel对象，对数据CRUD。 
 - **事务支持**:  提供简单易用的事务包装器及底层事务控制 
 - **自动类型转换**: 自动处理数据库类型与 Go 类型之间的转换
 - **参数化查询**: 自动处理 SQL 参数绑定，防止 SQL 注入
 - **分页查询**:  针对不同数据库优化的分页查询实现 
 - **日志记录**：内置 SQL 日志功能，轻松集成多种日志系统 
-- **缓存支持**: 内置二级缓存支持，支持本机内存缓存及 Redis 缓存，提供链式查询缓存
+- **缓存支持**: 支持内存缓存及 Redis 缓存，提供链式查询缓存,无需复杂操作,将SQL结果直接缓存
 - **连接池管理**: 内置连接池管理，提高性能
-- **连接池监控**: 提供连接池状态统计，支持 Prometheus 指标导出
+- **连接池监控**: 提供连接池状态统计
 - **查询超时控制**: 支持全局和单次查询超时设置，防止慢查询阻塞
 - **自动时间戳**: 支持配置自动时间戳字段，插入和更新时自动填充 created_at 和 updated_at
 - **软删除支持**: 支持配置软删除字段，自动过滤已删除记录，提供恢复和物理删除功能
@@ -60,7 +60,7 @@ DBKit 在大多数 CRUD 操作上领先 GORM，**总体性能快 15.1%**。
 
 ## 性能优化说明
 
-DBKit 默认关闭了时间戳自动更新、乐观锁检查和软删除检查功能，以获得最佳性能。如需启用：
+DBKit 默认关闭了时间戳自动更新、乐观锁检查和软删除检查功能，如需启用：
 
 ```go
 // 启用时间戳自动更新
@@ -1534,13 +1534,13 @@ DBKit 提供灵活的缓存策略，支持本地缓存和 Redis 缓存，你可�
 
 ```go
 // 方式 1：显式使用本地缓存（速度最快，单实例）
-user, _ := dbkit.LocalCache("user_cache").QueryFirst("SELECT * FROM users WHERE id = ?", 1)
+user, _ := dbkit.LocalCache("user_cache_store").QueryFirst("SELECT * FROM users WHERE id = ?", 1)
 
 // 方式 2：显式使用 Redis 缓存（分布式共享）
-order, _ := dbkit.RedisCache("order_cache").Query("SELECT * FROM orders WHERE user_id = ?", userId)
+order, _ := dbkit.RedisCache("order_cache_store").Query("SELECT * FROM orders WHERE user_id = ?", userId)
 
 // 方式 3：使用默认缓存（默认为本地缓存，可通过 SetDefaultCache 切换）
-data, _ := dbkit.Cache("default_cache").QueryFirst("SELECT * FROM configs WHERE key = ?", key)
+data, _ := dbkit.Cache("default_cache_store").QueryFirst("SELECT * FROM configs WHERE key = ?", key)
 ```
 
 #### 2. 初始化缓存
@@ -1566,20 +1566,20 @@ dbkit.SetDefaultCache(rc)
 
 ```go
 // 场景 1：配置数据用本地缓存（快速访问，很少变化）
-configs, _ := dbkit.LocalCache("config_cache", 10*time.Minute).
+configs, _ := dbkit.LocalCache("config_cache_store", 10*time.Minute).
     Query("SELECT * FROM configs")
 
 // 场景 2：业务数据用 Redis 缓存（多实例共享）
-orders, _ := dbkit.RedisCache("order_cache", 5*time.Minute).
+orders, _ := dbkit.RedisCache("order_cache_store", 5*time.Minute).
     Query("SELECT * FROM orders WHERE user_id = ?", userId)
 
 // 场景 3：混合使用
 func GetDashboardData(userID int) (*Dashboard, error) {
     // 配置用本地缓存
-    configs, _ := dbkit.LocalCache("configs").Query("SELECT * FROM configs")
+    configs, _ := dbkit.LocalCache("configs_store").Query("SELECT * FROM configs")
     
     // 用户数据用 Redis
-    user, _ := dbkit.RedisCache("users").QueryFirst("SELECT * FROM users WHERE id = ?", userID)
+    user, _ := dbkit.RedisCache("users_store").QueryFirst("SELECT * FROM users WHERE id = ?", userID)
     
     return &Dashboard{Configs: configs, User: user}, nil
 }
@@ -1590,6 +1590,7 @@ func GetDashboardData(userID int) (*Dashboard, error) {
 DBKit 提供三套缓存操作函数：
 
 **默认缓存操作**（操作当前默认缓存）：
+
 ```go
 // 存储缓存
 dbkit.CacheSet("my_store", "key1", "value1", 5*time.Minute)

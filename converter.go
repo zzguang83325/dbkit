@@ -89,7 +89,7 @@ func ToStruct(r *Record, dest interface{}) error {
 	}
 
 	val := reflect.ValueOf(dest)
-	if val.Kind() != reflect.Ptr || val.Elem().Kind() != reflect.Slice && val.Elem().Kind() != reflect.Struct {
+	if val.Kind() != reflect.Ptr || (val.Elem().Kind() != reflect.Slice && val.Elem().Kind() != reflect.Struct) {
 		return fmt.Errorf("dbkit: dest must be a pointer to a struct")
 	}
 
