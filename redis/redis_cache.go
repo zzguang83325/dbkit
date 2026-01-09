@@ -58,7 +58,7 @@ func (r *redisCache) CacheGet(cacheRepositoryName, key string) (interface{}, boo
 func (r *redisCache) CacheSet(cacheRepositoryName, key string, value interface{}, ttl time.Duration) {
 	fullKey := fmt.Sprintf("dbkit:%s:%s", cacheRepositoryName, key)
 
-	var data interface{} = value
+	var data = value
 	switch value.(type) {
 	case string, []byte:
 		data = value

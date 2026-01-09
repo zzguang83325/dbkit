@@ -29,26 +29,26 @@ DBKit 是一个基于 Go 语言的高性能、轻量级数据库ORM，灵感来�
 
 ## 性能对比
 
-DBKit 在大多数 CRUD 操作上领先 GORM，**总体性能快 15.1%**。
+DBKit 在大多数 CRUD 操作上领先 GORM，**总体性能快 18.1%**。
 
 基于 MySQL 的性能测试结果（使用独立表消除缓存效应）：
 
-| 测试项 | DBKit | GORM | 对比 |
-|--------|-------|------|------|
-| 单条插入 | 440 ops/s | 356 ops/s | **DBKit 快 18.9%** |
-| 批量插入 | 26,913 ops/s | 28,284 ops/s | GORM 快 4.8% |
-| 单条查询 | 1,628 ops/s | 1,584 ops/s | **DBKit 快 2.7%** |
-| 批量查询(100条) | 1,401 ops/s | 999 ops/s | **DBKit 快 28.7%** |
-| 条件查询 | 1,413 ops/s | 1,409 ops/s | **DBKit 快 0.3%** |
-| 更新操作 | 430 ops/s | 357 ops/s | **DBKit 快 17.1%** |
-| 删除操作 | 432 ops/s | 355 ops/s | **DBKit 快 17.9%** |
-| **总计** | **6.03s** | **7.09s** | **DBKit 快 15.1%** |
+| 测试项 | DBKit | GORM | DBKit ops/s | GORM ops/s | 对比 |
+|--------|-------|------|-------------|------------|------|
+| 单条插入 | 1.3361398s | 1.4542704s | 748 | 688 | **DBKit 快 8.1%** |
+| 批量插入 | 17.9313ms | 17.9536ms | 55768 | 55699 | **DBKit 快 0.1%** |
+| 单条查询 | 133.7865ms | 290.4602ms | 7475 | 3443 | **DBKit 快 53.9%** |
+| 批量查询(100条) | 34.9639ms | 45.434ms | 2860 | 2201 | **DBKit 快 23.0%** |
+| 条件查询 | 173.3263ms | 304.9913ms | 5769 | 3279 | **DBKit 快 43.2%** |
+| 更新操作 | 636.1461ms | 745.025ms | 786 | 671 | **DBKit 快 14.6%** |
+| 删除操作 | 621.3927ms | 748.1111ms | 805 | 668 | **DBKit 快 16.9%** |
+| **总计** | **2.9536866s** | **3.6062456s** | - | - | **DBKit 快 18.1%** |
 
 **关键优势：**
-- ✅ 批量查询快 28.7%（最大优势）
-- ✅ 单条插入快 18.9%，删除操作快 17.9%
-- ✅ 更新操作快 17.1%
-- ✅ 在 6/7 个测试项中领先
+- ✅ 单条查询快 53.9%（最大优势）
+- ✅ 条件查询快 43.2%，批量查询快 23.0%
+- ✅ 删除操作快 16.9%，更新操作快 14.6%
+- ✅ 在所有 7 个测试项中全面领先
 - ✅ Record 模式无反射开销，查询性能优异
 
 📊 **[查看完整性能测试报告](examples/benchmark/benchmark_report.md)**
@@ -57,6 +57,7 @@ DBKit 在大多数 CRUD 操作上领先 GORM，**总体性能快 15.1%**。
 - 使用独立表（`benchmark_users_dbkit` 和 `benchmark_users_gorm`）消除 MySQL 缓存效应
 - 相同的测试条件：数据量、批量大小、测试次数
 - 批量插入都使用事务以确保公平对比
+- 测试环境：Go 1.25.5, Windows/AMD64, 16 CPU 核心, MySQL 127.0.0.1:3306
 - 完整测试代码见 [examples/benchmark/](examples/benchmark/)
 
 ## 性能优化说明
@@ -119,104 +120,102 @@ import _ "github.com/sijms/go-ora/v2"
 package main
 
 import (
-    "fmt"
-    "log"
+	"fmt"
+	"log"
 
-    "github.com/zzguang83325/dbkit"
-    _ "github.com/go-sql-driver/mysql" // MySQL 驱动
-    //_ "github.com/denisenkom/go-mssqldb" // sqlserver驱动
+	_ "github.com/go-sql-driver/mysql" // MySQL 驱动
+	"github.com/zzguang83325/dbkit"
+	//_ "github.com/denisenkom/go-mssqldb" // sqlserver驱动
 	//_ "github.com/lib/pq" // postgresql 驱动
 	//_ "github.com/mattn/go-sqlite3" // sqlite驱动
 	//_ "github.com/sijms/go-ora/v2" // oracle驱动
 )
 
 func main() {
-    // 初始化数据库连接
-    err := dbkit.OpenDatabase(dbkit.MySQL, "root:password@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local", 10)
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer dbkit.Close()
+	// 初始化数据库连接
+	err := dbkit.OpenDatabase(dbkit.MySQL, "root:password@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local", 10)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dbkit.Close()
 
-    // 测试连接
-    if err := dbkit.Ping(); err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println("数据库连接成功")
+	// 测试连接
+	if err := dbkit.Ping(); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("数据库连接成功")
 
-    // 创建表
-    dbkit.Exec(`CREATE TABLE IF NOT EXISTS users (
+	// 创建表
+	dbkit.Exec(`CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
         age INT NOT NULL,
         email VARCHAR(100) NOT NULL UNIQUE
     )`)
 
-    // 创建Record, 并插入数据
-    user := dbkit.NewRecord().
-        Set("name", "张三").
-        Set("age", 25).
-        Set("email", "zhangsan@example.com")
-    
-    id, err := dbkit.Save("users", user) //表里存在主键记录时执行update,不存在时执行 insert
-    // 或
-    id, err := dbkit.Insert("users", user) // 执行insert 
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println("插入成功，ID:", id)
-    
-    // 原生sql插入数据
-    _, err = dbkit.Exec("INSERT INTO orders (user_id, order_date, total_amount, status) VALUES (?, CURDATE(), ?, 'completed')", 1, 5999.00)
+	// 创建Record, 并插入数据
+	user := dbkit.NewRecord().
+		Set("name", "张三").
+		Set("age", 25).
+		Set("email", "zhangsan@example.com")
+
+	id, err := dbkit.Save("users", user) //表里存在主键记录时执行update,不存在时执行 insert
+	// 或
+	id, err := dbkit.Insert("users", user) // 执行insert 
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("插入成功，ID:", id)
+
+	// 原生sql插入数据
+	_, err = dbkit.Exec("INSERT INTO orders (user_id, order_date, total_amount, status) VALUES (?, CURDATE(), ?, 'completed')", 1, 5999.00)
 	if err != nil {
 		log.Println("插入订单失败: %v", err)
 	}
 
-    // 查询数据
-    users, err := dbkit.Query("SELECT * FROM users where age > ?",18)
-    if err != nil {
-        log.Fatal(err)
-    }
-    for _, u := range users {
-        fmt.Printf("ID: %d, Name: %s, Age: %d, Email: %s\n", 
-            u.Int64("id"), u.Str("name"), u.Int("age"), u.Str("email"))
-    }
-    
-    //  查询1条数据
+	// 查询数据
+	users, err := dbkit.Query("SELECT * FROM users where age > ?", 18)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, u := range users {
+		fmt.Printf("ID: %d, Name: %s, Age: %d, Email: %s\n",
+			u.Int64("id"), u.Str("name"), u.Int("age"), u.Str("email"))
+	}
+
+	//  查询1条数据
 	record, _ := dbkit.QueryFirst("SELECT * FROM users WHERE id = ?", id)
 	if record != nil {
 		fmt.Printf("姓名: %s, 年龄: %d\n", record.GetString("name"), record.GetInt("age"))
 	}
 
-    // 更新数据
-    record.Set("age",18)
-    //方法1
-    dbkit.Save("users",record)  //Save方法,表里存在主键记录时执行update,不存在时执行 insert 
-    
-    //方法2
-    rows, err := dbkit.Update("users", record, "id = ?", id)
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println("更新成功，影响行数:", rows)
+	// 更新数据
+	record.Set("age", 18)
+	//方法1
+	dbkit.Save("users", record) //Save方法,表里存在主键记录时执行update,不存在时执行 insert 
 
-    // 删除数据
-    //方法1
-    dbkit.DeleteRecord("users",record)
-    //方法2
-    rows, err = dbkit.Delete("users", "id = ?", id)
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println("删除成功，影响行数:", rows)
-    
+	//方法2
+	rows, err := dbkit.Update("users", record, "id = ?", id)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("更新成功，影响行数:", rows)
 
-    
-    // 分页查询
+	// 删除数据
+	//方法1
+	dbkit.DeleteRecord("users", record)
+	//方法2
+	rows, err = dbkit.Delete("users", "id = ?", id)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("删除成功，影响行数:", rows)
+
+	// 分页查询
 
 	page := 1
 	perPage := 10
-	pageObj, err := dbkit.Paginate(page, perPage, "SELECT * from tablename where status=?", "id ASC",1)
+	pageObj, err := dbkit.Paginate(page, perPage, "SELECT * from tablename where status=?", "id ASC", 1)
 	if err != nil {
 		log.Printf("分页查询失败: %v", err)
 	} else {

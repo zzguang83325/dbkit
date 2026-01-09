@@ -238,13 +238,13 @@ func formatBytes(b int64) string {
 
 // Global cache state
 var (
-	localCacheInstance CacheProvider               // 本地缓存实例
-	redisCacheInstance CacheProvider               // Redis 缓存实例
-	defaultCache       CacheProvider               // 默认缓存提供者
-	defaultTTL         time.Duration = time.Minute // 默认 TTL
-	cacheConfigs       sync.Map                    // map[cacheRepositoryName]time.Duration
-	cacheMu            sync.RWMutex                // 缓存锁
-	cleanupOnce        sync.Once                   // 清理任务只执行一次
+	localCacheInstance CacheProvider // 本地缓存实例
+	redisCacheInstance CacheProvider // Redis 缓存实例
+	defaultCache       CacheProvider // 默认缓存提供者
+	defaultTTL         = time.Minute // 默认 TTL
+	cacheConfigs       sync.Map      // map[cacheRepositoryName]time.Duration
+	cacheMu            sync.RWMutex  // 缓存锁
+	cleanupOnce        sync.Once     // 清理任务只执行一次
 )
 
 // init 初始化默认使用本地缓存

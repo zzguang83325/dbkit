@@ -2,20 +2,21 @@ package models
 
 import (
 	"time"
+
 	"github.com/zzguang83325/dbkit"
 )
 
 // Demo represents the demo table
 type Demo struct {
 	dbkit.ModelCache
-	ID int64 `column:"id" json:"id"`
-	Name string `column:"name" json:"name"`
-	Age int64 `column:"age" json:"age"`
-	Salary float64 `column:"salary" json:"salary"`
-	IsActive int64 `column:"is_active" json:"is_active"`
-	Birthday string `column:"birthday" json:"birthday"`
+	ID        int64     `column:"id" json:"id"`
+	Name      string    `column:"name" json:"name"`
+	Age       int64     `column:"age" json:"age"`
+	Salary    float64   `column:"salary" json:"salary"`
+	IsActive  int64     `column:"is_active" json:"is_active"`
+	Birthday  string    `column:"birthday" json:"birthday"`
 	CreatedAt time.Time `column:"created_at" json:"created_at"`
-	Metadata string `column:"metadata" json:"metadata"`
+	Metadata  string    `column:"metadata" json:"metadata"`
 }
 
 // TableName returns the table name for Demo struct
@@ -106,4 +107,3 @@ func (m *Demo) PaginateBuilder(page int, pageSize int, whereSql string, orderBy 
 func (m *Demo) Paginate(page int, pageSize int, fullSQL string, args ...interface{}) (*dbkit.Page[*Demo], error) {
 	return dbkit.PaginateModel_FullSql[*Demo](m, m.GetCache(), page, pageSize, fullSQL, args...)
 }
-

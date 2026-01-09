@@ -484,7 +484,7 @@ func writeReportFile(totalDbkit, totalGorm time.Duration, overall string) {
 
 	fmt.Fprintf(f, "## 测试方法\n\n")
 	fmt.Fprintf(f, "为了确保测试的公平性和准确性，本测试采用以下方法：\n\n")
-	fmt.Fprintf(f, "1. **独立表测试**: DBKit 和 GORM 使用不同的表（`benchmark_users_dbkit` 和 `benchmark_users_gorm`），消除 MySQL 缓存效应的影响\n")
+	fmt.Fprintf(f, "1. **独立表测试**: DBKit 和 GORM 使用不同的表（`benchmark_users_dbkit` 和 `benchmark_users_gorm`），表结构相同,消除 MySQL 缓存效应的影响\n")
 	fmt.Fprintf(f, "2. **相同测试条件**: 两者使用相同的数据量、批量大小和测试次数\n")
 	fmt.Fprintf(f, "3. **事务一致性**: 批量插入测试中，两者都使用事务以确保公平对比\n")
 	fmt.Fprintf(f, "4. **预热处理**: 每个测试前都进行预热，避免冷启动影响\n\n")
@@ -517,7 +517,7 @@ func writeReportFile(totalDbkit, totalGorm time.Duration, overall string) {
 	}
 
 	if dbkitLeadCount > gormLeadCount {
-		fmt.Fprintf(f, "#### DBKit 全面领先\n")
+
 		if dbkitLeadCount == len(results) {
 			fmt.Fprintf(f, "本次测试中，**DBKit 在所有测试项目上都超越了 GORM**，展现出全面的性能优势：\n\n")
 		} else {
@@ -538,8 +538,6 @@ func writeReportFile(totalDbkit, totalGorm time.Duration, overall string) {
 	fmt.Fprintf(f, "**为什么 DBKit 在大多数场景下领先？**\n\n")
 	fmt.Fprintf(f, "1. **无反射开销**: Record 模式使用 `map[string]interface{}`，避免了结构体反射的性能损耗\n")
 	fmt.Fprintf(f, "2. **轻量级设计**: 默认关闭时间戳和乐观锁检查，减少不必要的开销\n")
-	fmt.Fprintf(f, "3. **优化的 SQL 构建**: 移除了不必要的排序操作，直接构建 SQL\n")
-	fmt.Fprintf(f, "4. **独立表测试**: 使用独立表消除了 MySQL 缓存效应，展现真实性能\n\n")
 
 	// 找出最大优势项
 	var maxAdvantage BenchmarkResult
@@ -604,13 +602,9 @@ func writeReportFile(totalDbkit, totalGorm time.Duration, overall string) {
 	fmt.Fprintf(f, "|------|--------------|------|\n")
 	fmt.Fprintf(f, "| 数据结构 | map[string]interface{} | 结构体反射 |\n")
 	fmt.Fprintf(f, "| 字段映射 | 无需映射 | 需要反射解析 tag |\n")
-	fmt.Fprintf(f, "| 内置功能 | 时间戳、乐观锁、软删除（可选） | 钩子、关联、迁移 |\n")
+	fmt.Fprintf(f, "| 内置功能 | 时间戳、乐观锁、软删除（可选）、SQL模板 | 钩子、关联、迁移 |\n")
 	fmt.Fprintf(f, "| 灵活性 | 动态字段 | 固定结构体 |\n")
 	fmt.Fprintf(f, "| 性能特点 | 轻量级，低开销 | 功能丰富，开销较高 |\n\n")
-
-	fmt.Fprintf(f, "### 适用场景\n\n")
-	fmt.Fprintf(f, "- **选择 DBKit**: 追求高性能、动态字段、简单 CRUD、微服务、API 后端\n")
-	fmt.Fprintf(f, "- **选择 GORM**: 需要完整 ORM 功能、关联查询、数据库迁移、钩子回调、复杂业务逻辑\n")
 
 	fmt.Println("\n✓ 报告已保存至: examples/benchmark/benchmark_report.md")
 }

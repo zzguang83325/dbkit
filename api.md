@@ -249,43 +249,44 @@ dbkit.SetDebugMode(true)
 package main
 
 import (
-    "fmt"
-    "time"
-    "github.com/zzguang83325/dbkit"
-    _ "github.com/go-sql-driver/mysql"
+	"fmt"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/zzguang83325/dbkit"
 )
 
 func main() {
-    // 启用调试模式查看监控日志
-    dbkit.SetDebugMode(true)
-    
-    // 配置连接监控
-    config := &dbkit.Config{
-        Driver:                dbkit.MySQL,
-        DSN:                   "user:pass@tcp(localhost:3306)/test",
-        MaxOpen:               10,
-        MonitorNormalInterval: 30 * time.Second, // 30秒正常检查
-        MonitorErrorInterval:  5 * time.Second,  // 5秒故障重试
-    }
-    
-    err := dbkit.OpenDatabaseWithConfig(config)
-    if err != nil {
-        fmt.Printf("数据库连接失败: %v\n", err)
-        return
-    }
-    defer dbkit.Close()
-    
-    fmt.Println("数据库连接成功，监控已启用")
-    
-    // 应用程序继续运行，监控在后台自动工作
-    // 监控器会：
-    // 1. 每30秒检查一次连接状态
-    // 2. 如果检测到连接问题，切换为每5秒重试
-    // 3. 连接恢复后，切换回30秒正常检查
-    // 4. 只在状态变化时记录日志
-    
-    // 模拟应用程序运行
-    time.Sleep(2 * time.Minute)
+	// 启用调试模式查看监控日志
+	dbkit.SetDebugMode(true)
+
+	// 配置连接监控
+	config := &dbkit.Config{
+		Driver:                dbkit.MySQL,
+		DSN:                   "user:pass@tcp(localhost:3306)/test",
+		MaxOpen:               10,
+		MonitorNormalInterval: 30 * time.Second, // 30秒正常检查
+		MonitorErrorInterval:  5 * time.Second,  // 5秒故障重试
+	}
+
+	err := dbkit.OpenDatabaseWithConfig(config)
+	if err != nil {
+		fmt.Printf("数据库连接失败: %v\n", err)
+		return
+	}
+	defer dbkit.Close()
+
+	fmt.Println("数据库连接成功，监控已启用")
+
+	// 应用程序继续运行，监控在后台自动工作
+	// 监控器会：
+	// 1. 每30秒检查一次连接状态
+	// 2. 如果检测到连接问题，切换为每5秒重试
+	// 3. 连接恢复后，切换回30秒正常检查
+	// 4. 只在状态变化时记录日志
+
+	// 模拟应用程序运行
+	time.Sleep(2 * time.Minute)
 }
 ```
 

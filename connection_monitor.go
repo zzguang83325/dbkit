@@ -76,7 +76,7 @@ func (cm *ConnectionMonitor) checkConnection() bool {
 
 	// 使用简单的 Ping 操作检查连接
 	err := cm.pinger.Ping()
-	isHealthy := (err == nil)
+	isHealthy := err == nil
 
 	// 只在状态变化时记录日志
 	if cm.lastHealthy != isHealthy {

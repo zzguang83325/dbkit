@@ -249,43 +249,44 @@ Connection monitoring has minimal performance impact:
 package main
 
 import (
-    "fmt"
-    "time"
-    "github.com/zzguang83325/dbkit"
-    _ "github.com/go-sql-driver/mysql"
+	"fmt"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/zzguang83325/dbkit"
 )
 
 func main() {
-    // Enable debug mode to see monitoring logs
-    dbkit.SetDebugMode(true)
-    
-    // Configure connection monitoring
-    config := &dbkit.Config{
-        Driver:                dbkit.MySQL,
-        DSN:                   "user:pass@tcp(localhost:3306)/test",
-        MaxOpen:               10,
-        MonitorNormalInterval: 30 * time.Second, // 30s normal check
-        MonitorErrorInterval:  5 * time.Second,  // 5s error retry
-    }
-    
-    err := dbkit.OpenDatabaseWithConfig(config)
-    if err != nil {
-        fmt.Printf("Database connection failed: %v\n", err)
-        return
-    }
-    defer dbkit.Close()
-    
-    fmt.Println("Database connected successfully, monitoring enabled")
-    
-    // Application continues running, monitoring works automatically in background
-    // Monitor will:
-    // 1. Check connection status every 30 seconds
-    // 2. If connection issues detected, switch to 5-second retry
-    // 3. After connection recovers, switch back to 30-second normal check
-    // 4. Only log when status changes
-    
-    // Simulate application running
-    time.Sleep(2 * time.Minute)
+	// Enable debug mode to see monitoring logs
+	dbkit.SetDebugMode(true)
+
+	// Configure connection monitoring
+	config := &dbkit.Config{
+		Driver:                dbkit.MySQL,
+		DSN:                   "user:pass@tcp(localhost:3306)/test",
+		MaxOpen:               10,
+		MonitorNormalInterval: 30 * time.Second, // 30s normal check
+		MonitorErrorInterval:  5 * time.Second,  // 5s error retry
+	}
+
+	err := dbkit.OpenDatabaseWithConfig(config)
+	if err != nil {
+		fmt.Printf("Database connection failed: %v\n", err)
+		return
+	}
+	defer dbkit.Close()
+
+	fmt.Println("Database connected successfully, monitoring enabled")
+
+	// Application continues running, monitoring works automatically in background
+	// Monitor will:
+	// 1. Check connection status every 30 seconds
+	// 2. If connection issues detected, switch to 5-second retry
+	// 3. After connection recovers, switch back to 30-second normal check
+	// 4. Only log when status changes
+
+	// Simulate application running
+	time.Sleep(2 * time.Minute)
 }
 ```
 

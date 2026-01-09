@@ -29,26 +29,26 @@ DBKit is a high-performance, lightweight database ORM library for Go, inspired  
 
 ## Performance Benchmark
 
-DBKit outperforms GORM in most CRUD operations, with **15.1% better overall performance**.
+DBKit outperforms GORM in most CRUD operations, with **18.1% better overall performance**.
 
 MySQL-based performance test results (using separate tables to eliminate cache effects):
 
-| Test | DBKit | GORM | Comparison |
-|------|-------|------|------------|
-| Single Insert | 440 ops/s | 356 ops/s | **DBKit 18.9% faster** |
-| Batch Insert | 26,913 ops/s | 28,284 ops/s | GORM 4.8% faster |
-| Single Query | 1,628 ops/s | 1,584 ops/s | **DBKit 2.7% faster** |
-| Batch Query (100 rows) | 1,401 ops/s | 999 ops/s | **DBKit 28.7% faster** |
-| Conditional Query | 1,413 ops/s | 1,409 ops/s | **DBKit 0.3% faster** |
-| Update | 430 ops/s | 357 ops/s | **DBKit 17.1% faster** |
-| Delete | 432 ops/s | 355 ops/s | **DBKit 17.9% faster** |
-| **Total** | **6.03s** | **7.09s** | **DBKit 15.1% faster** |
+| Test | DBKit | GORM | DBKit ops/s | GORM ops/s | Comparison |
+|------|-------|------|-------------|------------|------------|
+| Single Insert | 1.3361398s | 1.4542704s | 748 | 688 | **DBKit 8.1% faster** |
+| Batch Insert | 17.9313ms | 17.9536ms | 55768 | 55699 | **DBKit 0.1% faster** |
+| Single Query | 133.7865ms | 290.4602ms | 7475 | 3443 | **DBKit 53.9% faster** |
+| Batch Query (100 rows) | 34.9639ms | 45.434ms | 2860 | 2201 | **DBKit 23.0% faster** |
+| Conditional Query | 173.3263ms | 304.9913ms | 5769 | 3279 | **DBKit 43.2% faster** |
+| Update | 636.1461ms | 745.025ms | 786 | 671 | **DBKit 14.6% faster** |
+| Delete | 621.3927ms | 748.1111ms | 805 | 668 | **DBKit 16.9% faster** |
+| **Total** | **2.9536866s** | **3.6062456s** | - | - | **DBKit 18.1% faster** |
 
 **Key Advantages:**
-- ✅ Batch query 28.7% faster (biggest advantage)
-- ✅ Single insert 18.9% faster, delete 17.9% faster
-- ✅ Update 17.1% faster
-- ✅ Leads in 6 out of 7 test categories
+- ✅ Single query 53.9% faster (biggest advantage)
+- ✅ Conditional query 43.2% faster, batch query 23.0% faster
+- ✅ Delete 16.9% faster, update 14.6% faster
+- ✅ Leads in all 7 test categories
 - ✅ Record mode has no reflection overhead, excellent query performance
 
 📊 **[View Full Performance Report](examples/benchmark/benchmark_report.md)**
@@ -57,6 +57,7 @@ MySQL-based performance test results (using separate tables to eliminate cache e
 - Separate tables (`benchmark_users_dbkit` and `benchmark_users_gorm`) to eliminate MySQL cache effects
 - Same test conditions: data volume, batch size, test iterations
 - Both use transactions for batch insert to ensure fair comparison
+- Test environment: Go 1.25.5, Windows/AMD64, 16 CPU cores, MySQL 127.0.0.1:3306
 - Full benchmark code available in [examples/benchmark/](examples/benchmark/)
 
 ## Performance Optimization
@@ -117,86 +118,86 @@ import _ "github.com/sijms/go-ora/v2"
 package main
 
 import (
-    "fmt"
-    "log"
+	"fmt"
+	"log"
 
-    "github.com/zzguang83325/dbkit"
-    _ "github.com/go-sql-driver/mysql"
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/zzguang83325/dbkit"
 )
 
 func main() {
-    // Initialize database connection
-    err := dbkit.OpenDatabase(dbkit.MySQL, "root:password@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local", 10)
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer dbkit.Close()
+	// Initialize database connection
+	err := dbkit.OpenDatabase(dbkit.MySQL, "root:password@tcp(localhost:3306)/test?charset=utf8mb4&parseTime=True&loc=Local", 10)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dbkit.Close()
 
-    // Test connection
-    if err := dbkit.Ping(); err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println("Database connected successfully")
+	// Test connection
+	if err := dbkit.Ping(); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Database connected successfully")
 
-    // Create table
-    dbkit.Exec(`CREATE TABLE IF NOT EXISTS users (
+	// Create table
+	dbkit.Exec(`CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
         age INT NOT NULL,
         email VARCHAR(100) NOT NULL UNIQUE
     )`)
 
-    // Create Record and insert data
-    user := dbkit.NewRecord().
-        Set("name", "John").
-        Set("age", 25).
-        Set("email", "john@example.com")
-    
-    id, err := dbkit.Save("users", user)
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println("Insert successful, ID:", id)
+	// Create Record and insert data
+	user := dbkit.NewRecord().
+		Set("name", "John").
+		Set("age", 25).
+		Set("email", "john@example.com")
 
-    // Query data
-    users, err := dbkit.Query("SELECT * FROM users WHERE age > ?", 18)
-    if err != nil {
-        log.Fatal(err)
-    }
-    for _, u := range users {
-        fmt.Printf("ID: %d, Name: %s, Age: %d, Email: %s\n", 
-            u.Int64("id"), u.Str("name"), u.Int("age"), u.Str("email"))
-    }
+	id, err := dbkit.Save("users", user)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Insert successful, ID:", id)
 
-    // Query single record
-    record, _ := dbkit.QueryFirst("SELECT * FROM users WHERE id = ?", id)
-    if record != nil {
-        fmt.Printf("Name: %s, Age: %d\n", record.GetString("name"), record.GetInt("age"))
-    }
+	// Query data
+	users, err := dbkit.Query("SELECT * FROM users WHERE age > ?", 18)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, u := range users {
+		fmt.Printf("ID: %d, Name: %s, Age: %d, Email: %s\n",
+			u.Int64("id"), u.Str("name"), u.Int("age"), u.Str("email"))
+	}
 
-    // Update data
-    record.Set("age", 18)
-    dbkit.Save("users", record)
+	// Query single record
+	record, _ := dbkit.QueryFirst("SELECT * FROM users WHERE id = ?", id)
+	if record != nil {
+		fmt.Printf("Name: %s, Age: %d\n", record.GetString("name"), record.GetInt("age"))
+	}
 
-    // Delete data
-    rows, err := dbkit.Delete("users", "id = ?", id)
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println("Delete successful, affected rows:", rows)
+	// Update data
+	record.Set("age", 18)
+	dbkit.Save("users", record)
 
-    // Pagination
-    page := 1
-    perPage := 10
-    pageObj, err := dbkit.Paginate(page, perPage, "SELECT * from users where status=?", "id ASC", 1)
-    if err != nil {
-        log.Printf("Pagination failed: %v", err)
-    } else {
-        fmt.Printf("Page %d of %d (per page %d), total: %d\n", pageObj.PageNumber, pageObj.TotalPage, pageObj.PageSize, pageObj.TotalRow)
-        for i, user := range pageObj.List {
-            fmt.Printf("  %d. %s (ID: %d)\n", i+1, user.GetString("name"), user.GetInt("id"))
-        }
-    }
+	// Delete data
+	rows, err := dbkit.Delete("users", "id = ?", id)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Delete successful, affected rows:", rows)
+
+	// Pagination
+	page := 1
+	perPage := 10
+	pageObj, err := dbkit.Paginate(page, perPage, "SELECT * from users where status=?", "id ASC", 1)
+	if err != nil {
+		log.Printf("Pagination failed: %v", err)
+	} else {
+		fmt.Printf("Page %d of %d (per page %d), total: %d\n", pageObj.PageNumber, pageObj.TotalPage, pageObj.PageSize, pageObj.TotalRow)
+		for i, user := range pageObj.List {
+			fmt.Printf("  %d. %s (ID: %d)\n", i+1, user.GetString("name"), user.GetInt("id"))
+		}
+	}
 }
 ```
 
