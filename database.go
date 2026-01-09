@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -986,6 +987,23 @@ func (mgr *dbManager) getOrderedColumns(record *Record) ([]string, []interface{}
 	return columns, values
 }
 
+// getOrderedColumnsForInsert returns column names and their corresponding values from a record, excluding nil values
+// This is used for INSERT operations to avoid inserting NULL values for unset fields
+func (mgr *dbManager) getOrderedColumnsForInsert(record *Record) ([]string, []interface{}) {
+	if record == nil || len(record.columns) == 0 {
+		return nil, nil
+	}
+	columns := make([]string, 0, len(record.columns))
+	values := make([]interface{}, 0, len(record.columns))
+	for col, val := range record.columns {
+		if val != nil { // 只包含非 nil 的字段
+			columns = append(columns, col)
+			values = append(values, val)
+		}
+	}
+	return columns, values
+}
+
 func (mgr *dbManager) nativeUpsert(executor sqlExecutor, table string, record *Record, pks []string) (int64, error) {
 	driver := mgr.config.Driver
 
@@ -997,7 +1015,7 @@ func (mgr *dbManager) nativeUpsert(executor sqlExecutor, table string, record *R
 	// Apply version initialization for optimistic lock (for INSERT part of upsert)
 	mgr.applyVersionInit(table, record)
 
-	columns, values := mgr.getOrderedColumns(record)
+	columns, values := mgr.getOrderedColumnsForInsert(record)
 	var placeholders []string
 	for range columns {
 		placeholders = append(placeholders, "?")
@@ -1098,7 +1116,7 @@ func (mgr *dbManager) mergeUpsert(executor sqlExecutor, table string, record *Re
 	// Apply version initialization for optimistic lock (for INSERT part of merge)
 	mgr.applyVersionInit(table, record)
 
-	columns, values := mgr.getOrderedColumns(record)
+	columns, values := mgr.getOrderedColumnsForInsert(record)
 
 	// 构造 USING 子句
 	var selectCols []string
@@ -1209,7 +1227,7 @@ func (mgr *dbManager) insertWithOptions(executor sqlExecutor, table string, reco
 	// Apply version initialization for optimistic lock
 	mgr.applyVersionInit(table, record)
 
-	columns, values := mgr.getOrderedColumns(record)
+	columns, values := mgr.getOrderedColumnsForInsert(record)
 	var placeholders []string
 	for range columns {
 		placeholders = append(placeholders, "?")
@@ -2855,12 +2873,45 @@ func (mgr *dbManager) sanitizeArgs(querySQL string, args []interface{}) []interf
 		return args
 	}
 
-	if len(args) > placeholderCount {
-		// 如果参数过多，截断多余部分
-		return args[:placeholderCount]
+	var cleanedArgs []interface{}
+	maxArgs := placeholderCount
+	if len(args) < placeholderCount {
+		maxArgs = len(args)
 	}
 
-	return args
+	// 处理参数，解引用指针类型以便在日志中显示实际值
+	for i := 0; i < maxArgs; i++ {
+		arg := args[i]
+		if arg != nil {
+			// 使用反射检查是否为指针类型
+			v := reflect.ValueOf(arg)
+			if v.Kind() == reflect.Ptr {
+				if v.IsNil() {
+					cleanedArgs = append(cleanedArgs, nil)
+				} else {
+					// 解引用指针，获取实际值用于日志显示
+					actualValue := v.Elem().Interface()
+					// 如果是时间类型，格式化显示
+					if t, ok := actualValue.(time.Time); ok {
+						cleanedArgs = append(cleanedArgs, t.Format("2006-01-02 15:04:05"))
+					} else {
+						cleanedArgs = append(cleanedArgs, actualValue)
+					}
+				}
+			} else {
+				// 如果是时间类型，格式化显示
+				if t, ok := arg.(time.Time); ok {
+					cleanedArgs = append(cleanedArgs, t.Format("2006-01-02 15:04:05"))
+				} else {
+					cleanedArgs = append(cleanedArgs, arg)
+				}
+			}
+		} else {
+			cleanedArgs = append(cleanedArgs, nil)
+		}
+	}
+
+	return cleanedArgs
 }
 
 // logTrace 辅助函数，封装 SQL 日志记录逻辑
@@ -2874,9 +2925,66 @@ func (mgr *dbManager) logTrace(start time.Time, sql string, args []interface{}, 
 	}
 }
 
-// joinStrings joins strings with commas
-func joinStrings(strs []string) string {
-	return strings.Join(strs, ", ")
+// checkTableColumn 检查表中是否存在指定字段
+func (mgr *dbManager) checkTableColumn(table, column string) bool {
+	if mgr.db == nil {
+		return false
+	}
+
+	var query string
+	var args []interface{}
+
+	switch mgr.config.Driver {
+	case MySQL:
+		query = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?"
+		args = []interface{}{table, column}
+	case PostgreSQL:
+		query = "SELECT column_name FROM information_schema.columns WHERE table_name = ? AND column_name = ?"
+		args = []interface{}{table, column}
+	case SQLite3:
+		// SQLite 使用 PRAGMA table_info
+		query = "PRAGMA table_info(" + table + ")"
+		// 对于 SQLite，我们需要查询所有列然后检查
+	case SQLServer:
+		query = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ? AND COLUMN_NAME = ?"
+		args = []interface{}{table, column}
+	case Oracle:
+		query = "SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = UPPER(?) AND COLUMN_NAME = UPPER(?)"
+		args = []interface{}{table, column}
+	default:
+		return false
+	}
+
+	if mgr.config.Driver == SQLite3 {
+		// SQLite 特殊处理
+		rows, err := mgr.db.Query(query)
+		if err != nil {
+			return false
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var cid int
+			var name, dataType string
+			var notNull, pk int
+			var defaultValue interface{}
+
+			err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk)
+			if err != nil {
+				continue
+			}
+
+			if strings.EqualFold(name, column) {
+				return true
+			}
+		}
+		return false
+	} else {
+		// 其他数据库
+		var columnName string
+		err := mgr.db.QueryRow(query, args...).Scan(&columnName)
+		return err == nil
+	}
 }
 
 // PoolStats represents database connection pool statistics
@@ -3080,4 +3188,9 @@ func (mgr *dbManager) startConnectionMonitoring() error {
 	// 启动监控 goroutine
 	go monitor.run()
 	return nil
+}
+
+// joinStrings joins strings with commas
+func joinStrings(strs []string) string {
+	return strings.Join(strs, ", ")
 }

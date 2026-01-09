@@ -108,6 +108,16 @@ func (db *DB) ConfigOptimisticLockWithField(table, versionField string) *DB {
 	if db.lastErr != nil || db.dbMgr == nil {
 		return db
 	}
+
+	// 检查版本字段是否存在
+	if versionField != "" && !db.dbMgr.checkTableColumn(table, versionField) {
+		LogWarn(fmt.Sprintf("乐观锁配置警告: 表 '%s' 中不存在字段 '%s'", table, versionField), map[string]interface{}{
+			"db":    db.dbMgr.name,
+			"table": table,
+			"field": versionField,
+		})
+	}
+
 	db.dbMgr.setOptimisticLockConfig(table, &OptimisticLockConfig{
 		VersionField: versionField,
 	})

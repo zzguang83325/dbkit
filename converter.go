@@ -174,6 +174,11 @@ func setRecordFromStruct(r *Record, structVal reflect.Value) error {
 			continue
 		}
 
+		// 跳过 nil 指针字段，这样它们就不会被包含在 Record 中
+		if fieldVal.Kind() == reflect.Ptr && fieldVal.IsNil() {
+			continue
+		}
+
 		r.Set(fieldInfo.columnName, fieldVal.Interface())
 	}
 	return nil

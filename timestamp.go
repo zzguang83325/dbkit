@@ -1,6 +1,7 @@
 package dbkit
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -125,6 +126,24 @@ func (db *DB) ConfigTimestampsWithFields(table, createdAtField, updatedAtField s
 	if db.lastErr != nil || db.dbMgr == nil {
 		return db
 	}
+
+	// 检查字段是否存在
+	if createdAtField != "" && !db.dbMgr.checkTableColumn(table, createdAtField) {
+		LogWarn(fmt.Sprintf("时间戳配置警告: 表 '%s' 中不存在字段 '%s'", table, createdAtField), map[string]interface{}{
+			"db":    db.dbMgr.name,
+			"table": table,
+			"field": createdAtField,
+		})
+	}
+
+	if updatedAtField != "" && !db.dbMgr.checkTableColumn(table, updatedAtField) {
+		LogWarn(fmt.Sprintf("时间戳配置警告: 表 '%s' 中不存在字段 '%s'", table, updatedAtField), map[string]interface{}{
+			"db":    db.dbMgr.name,
+			"table": table,
+			"field": updatedAtField,
+		})
+	}
+
 	db.dbMgr.setTimestampConfig(table, &TimestampConfig{
 		CreatedAtField: createdAtField,
 		UpdatedAtField: updatedAtField,
@@ -226,8 +245,24 @@ func (mgr *dbManager) applyCreatedAtTimestamp(table string, record *Record, skip
 	if config == nil || config.CreatedAtField == "" {
 		return
 	}
-	// Only set if the field is not already set
+
+	// Check if field exists and has a valid value
+	shouldSet := false
 	if !record.Has(config.CreatedAtField) {
+		shouldSet = true
+	} else {
+		// Check if the existing value is nil or a zero time
+		val := record.Get(config.CreatedAtField)
+		if val == nil {
+			shouldSet = true
+		} else if t, ok := val.(time.Time); ok && t.IsZero() {
+			shouldSet = true
+		} else if tp, ok := val.(*time.Time); ok && (tp == nil || tp.IsZero()) {
+			shouldSet = true
+		}
+	}
+
+	if shouldSet {
 		record.Set(config.CreatedAtField, time.Now())
 	}
 }

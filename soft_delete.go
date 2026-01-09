@@ -76,9 +76,13 @@ type ISoftDeleteModel interface {
 
 // --- Global Functions (for default database) ---
 
-// ConfigSoftDelete configures soft delete for a table using timestamp type
-func ConfigSoftDelete(table, field string) {
-	ConfigSoftDeleteWithType(table, field, SoftDeleteTimestamp)
+// ConfigSoftDelete configures soft delete for a table using default field name "deleted_at" and timestamp type
+func ConfigSoftDelete(table string, field ...string) {
+	fieldName := "deleted_at" // 默认字段名
+	if len(field) > 0 && field[0] != "" {
+		fieldName = field[0]
+	}
+	ConfigSoftDeleteWithType(table, fieldName, SoftDeleteTimestamp)
 }
 
 // ConfigSoftDeleteWithType configures soft delete for a table with specified type
@@ -128,9 +132,13 @@ func Restore(table string, whereSql string, whereArgs ...interface{}) (int64, er
 
 // --- DB Methods ---
 
-// ConfigSoftDelete configures soft delete for a table using timestamp type
-func (db *DB) ConfigSoftDelete(table, field string) *DB {
-	return db.ConfigSoftDeleteWithType(table, field, SoftDeleteTimestamp)
+// ConfigSoftDelete configures soft delete for a table using default field name "deleted_at" and timestamp type
+func (db *DB) ConfigSoftDelete(table string, field ...string) *DB {
+	fieldName := "deleted_at" // 默认字段名
+	if len(field) > 0 && field[0] != "" {
+		fieldName = field[0]
+	}
+	return db.ConfigSoftDeleteWithType(table, fieldName, SoftDeleteTimestamp)
 }
 
 // ConfigSoftDeleteWithType configures soft delete for a table with specified type
@@ -138,6 +146,16 @@ func (db *DB) ConfigSoftDeleteWithType(table, field string, deleteType SoftDelet
 	if db.lastErr != nil || db.dbMgr == nil {
 		return db
 	}
+
+	// 检查软删除字段是否存在
+	if field != "" && !db.dbMgr.checkTableColumn(table, field) {
+		LogWarn(fmt.Sprintf("软删除配置警告: 表 '%s' 中不存在字段 '%s'", table, field), map[string]interface{}{
+			"db":    db.dbMgr.name,
+			"table": table,
+			"field": field,
+		})
+	}
+
 	db.dbMgr.setSoftDeleteConfig(table, &SoftDeleteConfig{
 		Field: field,
 		Type:  deleteType,
