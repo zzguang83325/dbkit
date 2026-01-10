@@ -2331,8 +2331,12 @@ func optimizeCountSQL(querySQL string) (string, bool) {
 	return optimized, true
 }
 
-// scanRecords is a helper function to scan sql.Rows into a slice of Record
-func scanRecords(rows *sql.Rows, driver DriverType) ([]Record, error) {
+// scanRecords_inefficiency 是原始的低效实现，保留作为对比参考
+// 该实现存在以下性能问题：
+// 1. 每次都创建新的Record对象，无法重用
+// 2. 通过中间map转换，增加了一次内存分配
+// 3. 没有利用已知的列数信息进行精确容量分配
+func scanRecords_inefficiency(rows *sql.Rows, driver DriverType) ([]Record, error) {
 	maps, err := scanRows(rows)
 	if err != nil {
 		return nil, err
@@ -2347,6 +2351,90 @@ func scanRecords(rows *sql.Rows, driver DriverType) ([]Record, error) {
 		}
 		results[i] = *record
 	}
+	return results, nil
+}
+
+// processDBValue 处理数据库返回值的类型转换
+// 将数据库驱动返回的[]byte根据数据库类型转换为合适的Go类型
+func processDBValue(val interface{}, dbType string) interface{} {
+	if b, ok := val.([]byte); ok {
+		if isNumericType(dbType) {
+			if s := string(b); s != "" {
+				return s
+			}
+			return nil
+		}
+
+		if !isBinaryType(dbType) {
+			return string(b)
+		}
+
+		// 对于二进制类型，复制数据避免底层缓冲区重用问题
+		bCopy := make([]byte, len(b))
+		copy(bCopy, b)
+		return bCopy
+	}
+
+	return val
+}
+
+// scanRecords 优化版本 - 直接扫描到Record，避免中间map转换
+// 性能优化点：
+// 1. 根据实际列数精确分配Record容量，避免Map扩容
+// 2. 直接扫描到Record，避免中间map的内存分配
+// 3. 重用扫描缓冲区，减少每行的内存分配
+// 4. 零Map扩容，完全避免rehashing开销
+// 注意：由于需要返回Record值而非指针，这里直接创建精确容量的Record
+//
+//	对象池更适合用于临时操作的场景
+func scanRecords(rows *sql.Rows, driver DriverType) ([]Record, error) {
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
+
+	numCols := len(columns)
+	var results []Record
+
+	// 重用扫描缓冲区，避免每行都分配新的slice
+	values := make([]interface{}, numCols)
+	valuePtrs := make([]interface{}, numCols)
+	for i := range columns {
+		valuePtrs[i] = &values[i]
+	}
+
+	for rows.Next() {
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, err
+		}
+
+		// 直接创建结果Record，使用精确容量（避免不必要的对象池操作）
+		resultRecord := &Record{
+			columns:     make(map[string]interface{}, numCols),
+			lowerKeyMap: make(map[string]string, numCols),
+		}
+
+		for i, col := range columns {
+			val := values[i]
+			dbType := strings.ToUpper(columnTypes[i].DatabaseTypeName())
+
+			// 使用专门的函数处理数据库值转换
+			processedVal := processDBValue(val, dbType)
+			resultRecord.Set(col, processedVal)
+		}
+
+		results = append(results, *resultRecord)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return results, nil
 }
 
