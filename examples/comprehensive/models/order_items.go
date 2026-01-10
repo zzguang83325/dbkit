@@ -2,17 +2,18 @@ package models
 
 import (
 	"time"
+
 	"github.com/zzguang83325/dbkit"
 )
 
 // OrderItem represents the order_items table
 type OrderItem struct {
 	dbkit.ModelCache
-	ID int64 `column:"id" json:"id"`
-	OrderID int64 `column:"order_id" json:"order_id"`
-	ProductID int64 `column:"product_id" json:"product_id"`
-	Quantity int64 `column:"quantity" json:"quantity"`
-	Price float64 `column:"price" json:"price"`
+	ID        int64   `column:"id" json:"id"`
+	OrderID   int64   `column:"order_id" json:"order_id"`
+	ProductID int64   `column:"product_id" json:"product_id"`
+	Quantity  int64   `column:"quantity" json:"quantity"`
+	Price     float64 `column:"price" json:"price"`
 }
 
 // TableName returns the table name for OrderItem struct
@@ -97,4 +98,3 @@ func (m *OrderItem) PaginateBuilder(page int, pageSize int, whereSql string, ord
 func (m *OrderItem) Paginate(page int, pageSize int, fullSQL string, args ...interface{}) (*dbkit.Page[*OrderItem], error) {
 	return dbkit.PaginateModel_FullSql[*OrderItem](m, m.GetCache(), page, pageSize, fullSQL, args...)
 }
-

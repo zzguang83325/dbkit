@@ -29,51 +29,45 @@ DBKit is a high-performance, lightweight database ORM library for Go, inspired  
 
 ## Performance Benchmark
 
-DBKit outperforms GORM in most CRUD operations, with **18.1% better overall performance**.
+DBKit outperforms GORM in most CRUD operations, with **16.7% better overall performance**.
 
-MySQL-based performance test results (using separate tables to eliminate cache effects):
+PostgreSQL-based performance test results (using separate tables to eliminate cache effects):
 
 | Test | DBKit | GORM | DBKit ops/s | GORM ops/s | Comparison |
 |------|-------|------|-------------|------------|------------|
-| Single Insert | 1.3361398s | 1.4542704s | 748 | 688 | **DBKit 8.1% faster** |
-| Batch Insert | 17.9313ms | 17.9536ms | 55768 | 55699 | **DBKit 0.1% faster** |
-| Single Query | 133.7865ms | 290.4602ms | 7475 | 3443 | **DBKit 53.9% faster** |
-| Batch Query (100 rows) | 34.9639ms | 45.434ms | 2860 | 2201 | **DBKit 23.0% faster** |
-| Conditional Query | 173.3263ms | 304.9913ms | 5769 | 3279 | **DBKit 43.2% faster** |
-| Update | 636.1461ms | 745.025ms | 786 | 671 | **DBKit 14.6% faster** |
-| Delete | 621.3927ms | 748.1111ms | 805 | 668 | **DBKit 16.9% faster** |
-| **Total** | **2.9536866s** | **3.6062456s** | - | - | **DBKit 18.1% faster** |
+| Concurrent Single Insert | 162.2583ms | 173.8674ms | 30815 | 28758 | **DBKit 6.7% faster** |
+| Batch Insert | 40.0806ms | 45.7345ms | 124749 | 109327 | **DBKit 12.4% faster** |
+| Concurrent Query | 136.3448ms | 143.6531ms | 73343 | 69612 | **DBKit 5.1% faster** |
+| Concurrent Update | 74.2748ms | 127.5289ms | 26927 | 15683 | **DBKit 41.8% faster** |
+| Concurrent Delete | 67.9199ms | 86.7332ms | 29446 | 23059 | **DBKit 21.7% faster** |
+| **Total** | **480.8784ms** | **577.5171ms** | - | - | **DBKit 16.7% faster** |
 
 **Key Advantages:**
-- ✅ Single query 53.9% faster (biggest advantage)
-- ✅ Conditional query 43.2% faster, batch query 23.0% faster
-- ✅ Delete 16.9% faster, update 14.6% faster
-- ✅ Leads in all 7 test categories
-- ✅ Record mode has no reflection overhead, excellent query performance
+- ✅ Concurrent update 41.8% faster (biggest advantage)
+- ✅ Concurrent delete 21.7% faster, batch insert 12.4% faster
+- ✅ Concurrent single insert 6.7% faster, concurrent query 5.1% faster
+- ✅ Leads in all 5 test categories
+- ✅ Record mode has no reflection overhead, excellent concurrent performance
+
+### Progressive Concurrent Stress Test
+
+| Concurrent Workers | DBKit TPS | GORM TPS | DBKit Success Rate | GORM Success Rate | Performance Advantage |
+|-------------------|-----------|----------|-------------------|-------------------|---------------------|
+| 100 | 94471 | 52529 | 100.0% | 100.0% | **DBKit 80% faster** |
+| 300 | 90315 | 52787 | 100.0% | 100.0% | **DBKit 71% faster** |
+| 500 | 84770 | 38402 | 100.0% | 100.0% | **DBKit 121% faster** |
+| 1000 | 87233 | 29644 | 100.0% | 100.0% | **DBKit 194% faster** |
+| 5000 | 78777 | 24873 | 100.0% | 100.0% | **DBKit 217% faster** |
 
 📊 **[View Full Performance Report](examples/benchmark/benchmark_report.md)**
 
 **Test Methodology:**
-- Separate tables (`benchmark_users_dbkit` and `benchmark_users_gorm`) to eliminate MySQL cache effects
+- Separate tables (`benchmark_users_dbkit` and `benchmark_users_gorm`) to eliminate cache effects
+- Unified driver: Both use the same pgx/v5 PostgreSQL driver
+- Sequential test architecture: Avoid doubling connection count by testing simultaneously
 - Same test conditions: data volume, batch size, test iterations
-- Both use transactions for batch insert to ensure fair comparison
-- Test environment: Go 1.25.5, Windows/AMD64, 16 CPU cores, MySQL 127.0.0.1:3306
+- Test environment: Go 1.25.5, Windows/AMD64, 16 CPU cores, PostgreSQL 192.168.10.220:5432
 - Full benchmark code available in [examples/benchmark/](examples/benchmark/)
-
-## Performance Optimization
-
-DBKit disables timestamp auto-update, optimistic lock checks, and soft delete checks by default for optimal performance. To enable:
-
-```go
-// Enable timestamp auto-update
-dbkit.EnableTimestamps()
-
-// Enable optimistic lock
-dbkit.EnableOptimisticLock()
-
-// Enable soft delete
-dbkit.EnableSoftDelete()
-```
 
 ## Installation
 
@@ -88,28 +82,28 @@ DBKit supports the following databases. Install the corresponding driver based o
 | Database   | Driver Package                   | Installation Command                      |
 | ---------- | -------------------------------- | ----------------------------------------- |
 | MySQL      | github.com/go-sql-driver/mysql   | `go get github.com/go-sql-driver/mysql`   |
-| PostgreSQL | github.com/lib/pq                | `go get github.com/lib/pq`                |
+| PostgreSQL | github.com/lib/pq                | `go get github.com/jackc/pgx/v5/stdlib`   |
 | SQLite3    | github.com/mattn/go-sqlite3      | `go get github.com/mattn/go-sqlite3`      |
 | SQL Server | github.com/denisenkom/go-mssqldb | `go get github.com/denisenkom/go-mssqldb` |
 | Oracle     | github.com/sijms/go-ora/v2       | `go get github.com/sijms/go-ora/v2`       |
 
-Import drivers in your code:
+ Import drivers in your code:
 
 ```go
 // MySQL
-import _ "github.com/go-sql-driver/mysql"
+import _ "github.com/zzguang83325/dbkit/drivers/mysql"
 
 // PostgreSQL
-import _ "github.com/lib/pq"
+import _ "github.com/zzguang83325/dbkit/drivers/postgres"
 
 // SQLite3
-import _ "github.com/mattn/go-sqlite3"
+import _ "github.com/zzguang83325/dbkit/drivers/sqlite"
 
 // SQL Server
-import _ "github.com/denisenkom/go-mssqldb"
+import _ "github.com/zzguang83325/dbkit/drivers/sqlserver"
 
 // Oracle
-import _ "github.com/sijms/go-ora/v2"
+import _ "github.com/zzguang83325/dbkit/drivers/oracle"
 ```
 
 ## Quick Start
@@ -120,9 +114,9 @@ package main
 import (
 	"fmt"
 	"log"
-
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/zzguang83325/dbkit"
+	_ "github.com/zzguang83325/dbkit/drivers/mysql"
+	
 )
 
 func main() {

@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
-	_ "github.com/lib/pq"
 	"github.com/zzguang83325/dbkit"
+	_ "github.com/zzguang83325/dbkit/drivers/postgres"
 )
 
 func main() {

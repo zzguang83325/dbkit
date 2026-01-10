@@ -6,8 +6,8 @@ import (
 	"math/rand"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/zzguang83325/dbkit"
+	_ "github.com/zzguang83325/dbkit/drivers/sqlite"
 	"github.com/zzguang83325/dbkit/examples/sqlite/models"
 )
 

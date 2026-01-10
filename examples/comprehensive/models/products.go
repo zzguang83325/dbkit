@@ -2,16 +2,17 @@ package models
 
 import (
 	"time"
+
 	"github.com/zzguang83325/dbkit"
 )
 
 // Product represents the products table
 type Product struct {
 	dbkit.ModelCache
-	ID int64 `column:"id" json:"id"`
-	Name string `column:"name" json:"name"`
-	Price float64 `column:"price" json:"price"`
-	Stock int64 `column:"stock" json:"stock"`
+	ID        int64     `column:"id" json:"id"`
+	Name      string    `column:"name" json:"name"`
+	Price     float64   `column:"price" json:"price"`
+	Stock     int64     `column:"stock" json:"stock"`
 	CreatedAt time.Time `column:"created_at" json:"created_at"`
 }
 
@@ -97,4 +98,3 @@ func (m *Product) PaginateBuilder(page int, pageSize int, whereSql string, order
 func (m *Product) Paginate(page int, pageSize int, fullSQL string, args ...interface{}) (*dbkit.Page[*Product], error) {
 	return dbkit.PaginateModel_FullSql[*Product](m, m.GetCache(), page, pageSize, fullSQL, args...)
 }
-

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/zzguang83325/dbkit"
+	_ "github.com/zzguang83325/dbkit/drivers/mysql"
 	"github.com/zzguang83325/dbkit/redis"
 )
 

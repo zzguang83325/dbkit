@@ -11,11 +11,14 @@ import (
 	"strings"
 	"sync"
 	"time"
-	// _ "github.com/go-sql-driver/mysql"
-	// _ "github.com/lib/pq"
-	// _ "github.com/mattn/go-sqlite3"
-	// _ "github.com/microsoft/go-mssqldb"
-	// _ "github.com/sijms/go-ora/v2"
+	// 推荐的数据库驱动（用户可根据需要导入）
+	// _ "github.com/go-sql-driver/mysql"           // MySQL驱动
+	// _ "github.com/jackc/pgx/v5/stdlib"          // PostgreSQL驱动（推荐，性能更好）
+	// _ "github.com/lib/pq"                       // PostgreSQL驱动（传统，兼容性好）
+	// _ "github.com/mattn/go-sqlite3"             // SQLite3驱动
+	// _ "github.com/denisenkom/go-mssqldb"        // SQL Server驱动
+	// _ "github.com/godror/godror"                // Oracle驱动（推荐）
+	// _ "github.com/sijms/go-ora/v2"              // Oracle驱动（纯Go实现）
 )
 
 // DriverType represents the database driver type

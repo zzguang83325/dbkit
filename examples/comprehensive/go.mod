@@ -1,6 +1,6 @@
 module github.com/zzguang83325/dbkit/examples/comprehensive
 
-go 1.23.0
+go 1.24.0
 
 replace github.com/zzguang83325/dbkit => ../../
 

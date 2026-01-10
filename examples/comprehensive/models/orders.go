@@ -2,16 +2,17 @@ package models
 
 import (
 	"time"
+
 	"github.com/zzguang83325/dbkit"
 )
 
 // Order represents the orders table
 type Order struct {
 	dbkit.ModelCache
-	ID int64 `column:"id" json:"id"`
-	UserID int64 `column:"user_id" json:"user_id"`
-	Amount float64 `column:"amount" json:"amount"`
-	Status string `column:"status" json:"status"`
+	ID        int64     `column:"id" json:"id"`
+	UserID    int64     `column:"user_id" json:"user_id"`
+	Amount    float64   `column:"amount" json:"amount"`
+	Status    string    `column:"status" json:"status"`
 	CreatedAt time.Time `column:"created_at" json:"created_at"`
 }
 
@@ -97,4 +98,3 @@ func (m *Order) PaginateBuilder(page int, pageSize int, whereSql string, orderBy
 func (m *Order) Paginate(page int, pageSize int, fullSQL string, args ...interface{}) (*dbkit.Page[*Order], error) {
 	return dbkit.PaginateModel_FullSql[*Order](m, m.GetCache(), page, pageSize, fullSQL, args...)
 }
-

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/lib/pq"
 	"github.com/zzguang83325/dbkit"
+	_ "github.com/zzguang83325/dbkit/drivers/postgres"
 	"github.com/zzguang83325/dbkit/examples/postgresql/models"
 )
 

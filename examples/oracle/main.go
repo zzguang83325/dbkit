@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/sijms/go-ora/v2"
 	"github.com/zzguang83325/dbkit"
+	_ "github.com/zzguang83325/dbkit/drivers/oracle"
 	"github.com/zzguang83325/dbkit/examples/oracle/models"
 )
 

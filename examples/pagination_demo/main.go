@@ -6,8 +6,8 @@ import (
 	"pagination_demo/models"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/zzguang83325/dbkit"
+	_ "github.com/zzguang83325/dbkit/drivers/mysql"
 )
 
 func main() {

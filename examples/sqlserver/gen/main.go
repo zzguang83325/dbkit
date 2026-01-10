@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
-	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/zzguang83325/dbkit"
+	_ "github.com/zzguang83325/dbkit/drivers/sqlserver"
 )
 
 func main() {

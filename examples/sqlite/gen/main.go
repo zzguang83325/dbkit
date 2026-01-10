@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/zzguang83325/dbkit"
+	_ "github.com/zzguang83325/dbkit/drivers/sqlite"
 )
 
 func main() {

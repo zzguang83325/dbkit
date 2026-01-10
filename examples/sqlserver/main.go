@@ -6,8 +6,8 @@ import (
 	"math/rand"
 	"time"
 
-	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/zzguang83325/dbkit"
+	_ "github.com/zzguang83325/dbkit/drivers/sqlserver"
 	"github.com/zzguang83325/dbkit/examples/sqlserver/models"
 )
 

@@ -2,17 +2,18 @@ package models
 
 import (
 	"time"
+
 	"github.com/zzguang83325/dbkit"
 )
 
 // User represents the users table
 type User struct {
 	dbkit.ModelCache
-	ID int64 `column:"id" json:"id"`
-	Username string `column:"username" json:"username"`
-	Email string `column:"email" json:"email"`
-	Age int64 `column:"age" json:"age"`
-	Status string `column:"status" json:"status"`
+	ID        int64     `column:"id" json:"id"`
+	Username  string    `column:"username" json:"username"`
+	Email     string    `column:"email" json:"email"`
+	Age       int64     `column:"age" json:"age"`
+	Status    string    `column:"status" json:"status"`
 	DeletedAt time.Time `column:"deleted_at" json:"deleted_at"`
 	CreatedAt time.Time `column:"created_at" json:"created_at"`
 }
@@ -99,4 +100,3 @@ func (m *User) PaginateBuilder(page int, pageSize int, whereSql string, orderBy 
 func (m *User) Paginate(page int, pageSize int, fullSQL string, args ...interface{}) (*dbkit.Page[*User], error) {
 	return dbkit.PaginateModel_FullSql[*User](m, m.GetCache(), page, pageSize, fullSQL, args...)
 }
-
